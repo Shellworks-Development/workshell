@@ -1,0 +1,430 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Workshell design tokens. Monochrome chrome; one brand accent (user-selectable); status
+ * colors only where they carry meaning. Components use these via Tailwind
+ * (bg-surface, text-muted, border-border, …).
+ */
+:root {
+  --bg: #f6f6f3;
+  --surface: #ffffff;
+  --surface-2: #f1f1ed;
+  --surface-3: #e7e6e1;
+  --border: #e4e3de;
+  --border-strong: #d2d1cb;
+  --fg: #1d1d20;
+  --muted: #5f5f66;
+  --faint: #8c8c93;
+  --inverse: #ffffff;
+
+  --accent: #6d4aff;
+  --accent-fg: #ffffff;
+  --accent-soft: #efebff;
+
+  --danger: #dc2f3c;
+  --danger-soft: #fdeced;
+  --warning: #b45309;
+  --warning-soft: #fdf3e2;
+  --success: #15803d;
+  --success-soft: #e7f6ec;
+  --info: #2563eb;
+  --info-soft: #eaf1fe;
+
+  --overlay: rgb(10 10 12 / 0.32);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.06), 0 4px 8px -2px rgb(0 0 0 / 0.06), 0 16px 32px -8px rgb(0 0 0 / 0.12);
+  color-scheme: light;
+
+  /* Motion tokens (see the animate skill): strong curves; UI stays under 300ms. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.dark {
+  --bg: #18181b;
+  --surface: #1f1f23;
+  --surface-2: #26262b;
+  --surface-3: #303036;
+  --border: #2c2c32;
+  --border-strong: #3c3c44;
+  --fg: #e6e6ea;
+  --muted: #a2a2ab;
+  --faint: #74747d;
+  --inverse: #1f1f23;
+
+  --accent: #9d87ff;
+  --accent-fg: #18181b;
+  --accent-soft: #2c2840;
+
+  --danger: #f2727c;
+  --danger-soft: #3a2427;
+  --warning: #e8c06a;
+  --warning-soft: #37311f;
+  --success: #6fcf97;
+  --success-soft: #21342a;
+  --info: #7aa7f5;
+  --info-soft: #232e44;
+
+  --overlay: rgb(0 0 0 / 0.6);
+  --shadow-sm: 0 0 0 1px rgb(255 255 255 / 0.02);
+  --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.05), 0 16px 40px -8px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-inverse: var(--inverse);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'ss01';
+}
+
+* {
+  border-color: var(--border);
+}
+
+/* ---- Mobile platform baseline (see the mobile-native skill) ---------------- */
+html {
+  /* No gray flash on tap; controls give their own :active feedback. */
+  -webkit-tap-highlight-color: transparent;
+  /* No font inflation in landscape. */
+  -webkit-text-size-adjust: 100%;
+  /* An app shell, not a document: no pull-to-refresh / page rubber-band. */
+  overscroll-behavior: none;
+}
+body {
+  overscroll-behavior: none;
+}
+/* Fire clicks immediately (no double-tap-zoom wait). */
+button,
+a,
+[role='button'],
+[role='tab'],
+[role='switch'],
+summary,
+label {
+  touch-action: manipulation;
+}
+/* Long-pressing a control shouldn't select its label or pop the callout. */
+button,
+[role='button'],
+[role='tab'],
+[role='switch'],
+.btn,
+.kbd {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+/* iOS zooms into inputs under 16px and never zooms back out. */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select,
+  .input {
+    font-size: 16px;
+  }
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 2px;
+}
+
+@layer components {
+  .card {
+    @apply min-w-0 rounded-xl border border-border bg-surface;
+    box-shadow: var(--shadow-sm);
+  }
+  .card-header {
+    @apply flex min-h-12 items-center justify-between gap-3 border-b border-border px-4 py-2.5;
+  }
+  .card-title {
+    @apply text-sm font-medium text-fg;
+  }
+  .section-title {
+    @apply mb-2.5 text-sm font-medium text-fg;
+  }
+  .btn {
+    @apply inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium whitespace-nowrap text-fg select-none hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50;
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease,
+      transform 160ms var(--ease-out);
+  }
+  .btn:not(:disabled):active {
+    transform: scale(0.97);
+  }
+  .btn-primary {
+    @apply border-transparent bg-fg text-inverse hover:bg-fg;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .btn-primary:not(:disabled):hover {
+      background: color-mix(in srgb, var(--fg) 86%, var(--bg));
+    }
+  }
+  .btn-danger {
+    @apply border-transparent bg-danger text-white hover:bg-danger;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .btn-danger:not(:disabled):hover {
+      background: color-mix(in srgb, var(--danger) 88%, black);
+    }
+  }
+  .btn-ghost {
+    @apply border-transparent bg-transparent text-muted hover:bg-surface-2 hover:text-fg;
+  }
+  .btn-sm {
+    @apply h-7 px-2.5 text-xs;
+  }
+  .btn-icon {
+    @apply size-8 px-0;
+  }
+  .input {
+    @apply h-8 w-full rounded-md border border-border bg-surface px-2.5 text-[13px] text-fg outline-none placeholder:text-faint hover:border-border-strong focus:border-fg/40 focus:ring-3 focus:ring-fg/8;
+    transition:
+      border-color 150ms ease,
+      box-shadow 150ms ease;
+  }
+  textarea.input {
+    @apply h-auto py-2 leading-relaxed;
+  }
+  .label {
+    @apply mb-1.5 block text-[13px] font-medium text-fg;
+  }
+  .hint {
+    @apply mt-1.5 text-xs text-muted;
+  }
+  .table {
+    @apply w-full text-left text-[13px];
+  }
+  .table th {
+    @apply h-9 border-b border-border px-4 text-xs font-normal whitespace-nowrap text-muted;
+  }
+  .table td {
+    @apply border-b border-border px-4 py-2.5 align-middle;
+  }
+  .table tr:last-child td {
+    @apply border-b-0;
+  }
+  .table tbody tr.clickable {
+    @apply cursor-pointer;
+  }
+  .table tbody tr.clickable:active td {
+    @apply bg-surface-2;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .table tbody tr.clickable:hover td {
+      @apply bg-surface-2;
+    }
+  }
+  .mono {
+    @apply font-mono text-[12.5px];
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-md border border-border bg-surface-2 px-1.5 py-px font-mono text-[11.5px] text-muted;
+  }
+  .kbd {
+    @apply inline-grid h-5 min-w-5 place-items-center rounded border border-border bg-surface px-1 font-sans text-[11px] text-muted;
+  }
+  .link {
+    @apply text-fg underline decoration-border-strong underline-offset-2 hover:decoration-fg;
+  }
+  .dot {
+    @apply inline-block size-2 shrink-0 rounded-full;
+  }
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Motion -------------------------------------------------------------- */
+
+/* Route change: content settles in rather than teleporting. Enter only, so
+   navigation never waits on an exit. Seen tens of times a day: keep it short. */
+.page-enter {
+  animation: page-in 180ms var(--ease-out);
+}
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Occasional surfaces (project grid, sign-in card) get a short stagger. */
+.stagger > * {
+  animation: rise-in 300ms var(--ease-out) backwards;
+}
+.stagger > :nth-child(2) { animation-delay: 40ms; }
+.stagger > :nth-child(3) { animation-delay: 80ms; }
+.stagger > :nth-child(4) { animation-delay: 120ms; }
+.stagger > :nth-child(5) { animation-delay: 160ms; }
+.stagger > :nth-child(n + 6) { animation-delay: 200ms; }
+.rise-in {
+  animation: rise-in 300ms var(--ease-out) backwards;
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* Modal: centered, so it scales from the center. */
+.modal-enter-active,
+.modal-leave-active {
+  transition:
+    opacity 250ms var(--ease-out),
+    transform 250ms var(--ease-out);
+}
+.modal-leave-active {
+  transition-duration: 150ms;
+}
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+  transform: scale(0.96);
+}
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 250ms var(--ease-out);
+}
+.fade-leave-active {
+  transition-duration: 150ms;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* Popovers scale out of their trigger; origin is set inline per placement. */
+.pop-enter-active,
+.pop-leave-active {
+  transition:
+    opacity 180ms var(--ease-out),
+    transform 180ms var(--ease-out);
+}
+.pop-leave-active {
+  transition-duration: 120ms;
+}
+.pop-enter-from,
+.pop-leave-to {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+/* Toasts: transitions (not keyframes) so rapid toasts retarget smoothly;
+   they leave the way they came in. */
+.toast-enter-active,
+.toast-leave-active,
+.toast-move {
+  transition:
+    opacity 400ms ease,
+    transform 400ms ease;
+}
+.toast-leave-active {
+  position: absolute;
+  right: 0;
+  left: 0;
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateY(100%);
+}
+
+/* New lines arriving in live tail: a brief highlight that fades out. */
+.just-arrived {
+  animation: arrive 1200ms ease-out;
+}
+@keyframes arrive {
+  from {
+    background-color: var(--accent-soft);
+  }
+}
+
+/* Loading placeholders. */
+.skeleton {
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Fewer and gentler: keep fades, drop movement. */
+  .page-enter,
+  .stagger > *,
+  .rise-in {
+    animation-name: fade-in;
+  }
+  .modal-enter-from,
+  .modal-leave-to,
+  .pop-enter-from,
+  .pop-leave-to,
+  .toast-enter-from,
+  .toast-leave-to {
+    transform: none;
+  }
+  .btn:not(:disabled):active {
+    transform: none;
+  }
+  .skeleton,
+  .animate-ping {
+    animation: none;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}

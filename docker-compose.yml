@@ -1,0 +1,34 @@
+services:
+  workshell:
+    build: .
+    image: workshell
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - workshell-data:/data
+    environment:
+      # The public HTTPS URL your Roblox servers will send data to.
+      WORKSHELL_PUBLIC_URL: https://workshell.example.com
+      # Set both when running behind an HTTPS reverse proxy (Caddy, nginx, Cloudflare…).
+      WORKSHELL_SECURE_COOKIES: "true"
+      WORKSHELL_TRUST_PROXY: "true"
+      # Durable ingest queue + live streaming. Remove to use the in-process queue.
+      WORKSHELL_REDIS_URL: redis://redis:6379/0
+      # Master key for encrypting stored secrets (32 bytes, hex). Generate with:
+      #   openssl rand -hex 32
+      # If unset, one is generated into the data volume on first start.
+      # WORKSHELL_SECRET_KEY: ...
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+
+volumes:
+  workshell-data:
+  redis-data:

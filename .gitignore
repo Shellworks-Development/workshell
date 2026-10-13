@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Built dashboard (embedded into the Go binary at build time)
+web/dist/*
+!web/dist/.gitkeep
+
+# Binaries
+/workshell
+/workshell-sim
+/bin/
+
+# Local data
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# SDK build output
+*.rbxm
+*.rbxmx

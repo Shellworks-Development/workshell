@@ -1,0 +1,8 @@
+<!-- Workshell mark: a "W" with a shell prompt cursor, on a solid violet tile. -->
+<template>
+  <svg viewBox="0 0 32 32" aria-hidden="true">
+    <rect width="32" height="32" rx="8" fill="#6d4aff" />
+    <path d="M6.5 11l3.4 10.5L14 15l4.1 6.5L21.5 11" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M23 21.5h3.5" stroke="#5eead4" stroke-width="2.5" stroke-linecap="round" />
+  </svg>
+</template>
