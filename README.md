@@ -31,31 +31,31 @@ Roblox gives you very little visibility into what your live servers are doing. W
 <tr>
 <td width="50%" valign="top">
 
-**🐞 Issues**<br>
+<img src="docs/icons/bug.svg" width="18" height="18" align="top" alt=""> **Issues**<br>
 Server and client errors grouped by cause. Stack traces map to your source files through Rojo sourcemaps, with breadcrumbs, affected players and the release that introduced each one. Workshell detects regressions. Assign, comment with @mentions, and open linked GitHub issues.
 
-**📜 Logs**<br>
+<img src="docs/icons/scroll-text.svg" width="18" height="18" align="top" alt=""> **Logs**<br>
 All server output plus structured logs. Search, filter by server or player, and tail them live.
 
-**🧑‍🚀 Sessions & players**<br>
+<img src="docs/icons/waves.svg" width="18" height="18" align="top" alt=""> **Sessions & players**<br>
 Every play session on one timeline: events, logs, errors, traces, purchases, exploit detections and client FPS, ping and memory.
 
-**⚡ Performance**<br>
+<img src="docs/icons/gauge.svg" width="18" height="18" align="top" alt=""> **Performance**<br>
 `Workshell.trace` spans with p50 and p95 timings. Open any slow run as a waterfall of nested spans. Also shows client frame rate and ping by platform, and server health.
 
 </td>
 <td width="50%" valign="top">
 
-**🚀 Releases**<br>
+<img src="docs/icons/git-commit-horizontal.svg" width="18" height="18" align="top" alt=""> **Releases**<br>
 Every version your servers run, with its git commit, the issues it introduced and its error-free session rate.
 
-**🛡️ Security**<br>
+<img src="docs/icons/shield-alert.svg" width="18" height="18" align="top" alt=""> **Security**<br>
 Exploit detections from `Workshell.flag`, validated and rate-limited remotes, automatic flood detection, and optional pseudonymous (HMAC-hashed) player ids.
 
-**📈 Analytics & alerts**<br>
+<img src="docs/icons/chart-column.svg" width="18" height="18" align="top" alt=""> **Analytics & alerts**<br>
 CCU, DAU, retention, platforms, countries, Robux revenue, custom events, funnels and metrics. Alert rules deliver to Discord or any webhook.
 
-**🧭 Whiteboards**<br>
+<img src="docs/icons/presentation.svg" width="18" height="18" align="top" alt=""> **Whiteboards**<br>
 Lay out an investigation on a shared canvas. Combine sticky notes and arrows with snapshots of charts, issues, sessions, logs and traces sent from anywhere in the dashboard. Pin notes to points on any chart.
 
 </td>
