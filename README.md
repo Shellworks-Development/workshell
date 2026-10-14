@@ -194,6 +194,8 @@ It records the git commit, branch, message and author. It writes `WorkshellRelea
 
 Exploiters can reach Workshell only through your game's clients, and they will try. Workshell assumes it.
 
+Found a vulnerability? Please report it privately; see [SECURITY.md](SECURITY.md).
+
 - **Signed requests.** With a signing secret, each batch is signed with HMAC-SHA256 over a timestamp and the body. With "require signed requests" on, a leaked ingest key alone can't forge or replay data.
 - **Flood limits.** Client data is capped per player, and floods are dropped and recorded as `client_flood` detections. A flagged player's client-only errors are quarantined so they can't bury real issues. Server logs are capped per server, and each project has an ingest rate limit.
 - **Safe rendering.** All user-supplied text renders as text, never HTML. A strict Content-Security-Policy forbids inline and third-party scripts. Control and bidi characters are stripped at ingest, and alerts can't ping `@everyone`.
