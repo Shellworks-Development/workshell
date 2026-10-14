@@ -76,6 +76,9 @@ func runRelease(args []string) error {
 		if err != nil {
 			return err
 		}
+		if !json.Valid(b) {
+			return fmt.Errorf("%s is not a valid sourcemap; create one with `rojo sourcemap`", *sourcemap)
+		}
 		smap = b
 	default:
 		if _, err := os.Stat(*project); err == nil {
@@ -91,10 +94,16 @@ func runRelease(args []string) error {
 		}
 	}
 
-	body, _ := json.Marshal(map[string]any{
+	if len(smap) > 0 && !json.Valid(smap) {
+		return errors.New("rojo sourcemap printed invalid JSON")
+	}
+	body, err := json.Marshal(map[string]any{
 		"version": *ver, "commit": commit, "branch": branch, "message": message, "author": author,
 		"placeVersion": *placeVersion, "sourcemap": smap,
 	})
+	if err != nil {
+		return err
+	}
 	if *dryRun {
 		var pretty bytes.Buffer
 		json.Indent(&pretty, body, "", "  ")
