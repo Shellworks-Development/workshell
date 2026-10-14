@@ -205,16 +205,13 @@ Exploiters can reach Workshell only through your game's clients, and they will t
 
 Retention is set per project. By default logs, traces and health data are kept for 14 days, and errors, events, sessions and detections for 90 days. Whiteboard snapshots are kept until you delete them.
 
-## How it works
+## Development
 
+```sh
+make dev        # server on :8080
+make dev-web    # dashboard with hot reload on :5173, reachable on your LAN for phone testing
+make test       # Go tests, dashboard type check, SDK tests (needs `luau`)
 ```
-Roblox server ──(gzip JSON, HMAC-signed)──▶ POST /api/v1/ingest ──▶ queue (memory or Redis Stream)
-Roblox clients ─(RemoteEvent, rate-limited)─▶ server SDK                          │
-                                                                          writer ─┴─▶ SQLite (WAL)
-Browser / PWA ──▶ Vue dashboard ──▶ /api/projects/…  ◀── live updates (SSE: memory or Redis pub/sub)
-```
-
-A simulated week of traffic (about 680k items) ingests in a few seconds, and dashboard queries return in well under a second.
 
 <details>
 <summary><b>Repository layout and ingest protocol</b></summary>
@@ -235,16 +232,8 @@ A simulated week of traffic (about 680k items) ingests in a few seconds, and das
 
 </details>
 
-## Development
-
-```sh
-make dev        # server on :8080
-make dev-web    # dashboard with hot reload on :5173, reachable on your LAN for phone testing
-make test       # Go tests, dashboard type check, SDK tests (needs `luau`)
-```
-
 ## License
 
 [PolyForm Shield 1.0.0](LICENSE). You can use, modify and self-host Workshell for anything, including commercially, except to offer a product that competes with Workshell.
 
-Required Notice: Copyright 2026 Darwin
+Required Notice: Copyright 2026 Shellworks Development
