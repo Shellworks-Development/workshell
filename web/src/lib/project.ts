@@ -18,3 +18,8 @@ export function useProject(): ProjectContext {
   if (!ctx) throw new Error('useProject() called outside a project route')
   return ctx
 }
+
+/** Like useProject, but returns null outside a project route. */
+export function useMaybeProject(): ProjectContext | null {
+  return inject(key, null)
+}

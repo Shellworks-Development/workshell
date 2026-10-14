@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Pause, Play, ScrollText, Search, X } from 'lucide-vue-next'
+import { Pause, Play, ScrollText, Search, Server, User, X } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import EmptyState from '@/components/EmptyState.vue'
@@ -10,8 +10,10 @@ import TimeChart from '@/components/TimeChart.vue'
 import { api, type LiveMsg, type LogLine, type Timeseries } from '@/lib/api'
 import { useLive } from '@/lib/live'
 import { levelColors } from '@/lib/chartTheme'
-import { dateTime, num, shortId } from '@/lib/format'
+import { absolute, dateTime, num, shortId, time } from '@/lib/format'
 import { useProject } from '@/lib/project'
+import SendButton from '@/components/whiteboard/SendButton.vue'
+import { logSnap } from '@/lib/snapshots'
 
 const { pid } = useProject()
 const route = useRoute()
@@ -144,7 +146,7 @@ const levelClass: Record<string, string> = {
         <button
           v-for="l in levels"
           :key="l"
-          class="flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-xs font-medium transition-colors"
+          class="flex h-9 cursor-pointer items-center sm:h-7 gap-1.5 rounded-md border px-2 text-xs font-medium transition-colors"
           :class="enabled.has(l) ? 'border-border-strong bg-surface-2 text-fg' : 'border-transparent text-faint hover:text-muted'"
           @click="toggleLevel(l)"
         >
@@ -152,12 +154,12 @@ const levelClass: Record<string, string> = {
           {{ l }}
         </button>
       </div>
-      <div class="relative min-w-48 flex-1">
+      <div class="relative min-w-48 flex-1 max-sm:basis-full">
         <Search class="pointer-events-none absolute top-2 left-2.5 size-4 text-faint" />
         <input v-model="search" class="input pl-8" placeholder="Search messages" />
       </div>
-      <input v-model="jobId" class="input w-40" placeholder="Server job id" />
-      <input v-model="userId" class="input w-32" placeholder="User id" inputmode="numeric" />
+      <input v-model="jobId" class="input w-40 max-sm:w-auto max-sm:min-w-0 max-sm:flex-1" placeholder="Server job id" />
+      <input v-model="userId" class="input w-32 max-sm:w-auto max-sm:min-w-0 max-sm:flex-1" placeholder="User id" inputmode="numeric" />
     </div>
     <div class="p-3">
       <TimeChart
@@ -176,31 +178,44 @@ const levelClass: Record<string, string> = {
       Try a wider time range or fewer filters. Server output is captured automatically; use
       <code class="mono">Workshell.info()</code> for structured logs.
     </EmptyState>
-    <div class="mono divide-y divide-border">
-      <div v-for="l in logs" :key="l.id" class="group">
-        <div
-          class="flex items-start gap-3 px-3 py-1.5 hover:bg-surface-2"
-          :class="{ 'cursor-pointer': hasAttrs(l), 'bg-danger-soft/40': l.level === 'error', 'just-arrived': arrived.has(l.id) }"
-          @click="hasAttrs(l) && toggleExpand(l.id)"
-        >
-          <span class="w-36 shrink-0 text-faint">{{ dateTime(l.ts) }}</span>
-          <span class="w-10 shrink-0 font-semibold uppercase" :class="levelClass[l.level]">{{ l.level }}</span>
-          <span class="min-w-0 flex-1 break-all whitespace-pre-wrap">{{ l.message }}</span>
-          <span v-if="hasAttrs(l)" class="chip shrink-0">{{ Object.keys(l.attrs).length }} attrs</span>
-          <button
-            v-if="l.userId"
-            class="hidden shrink-0 text-faint hover:text-accent sm:block"
-            title="Filter by this player"
-            @click.stop="userId = String(l.userId)"
+    <!-- One line per log, like a terminal: long lines scroll sideways instead of wrapping. -->
+    <div class="overflow-x-auto overscroll-x-contain">
+      <div class="mono w-max min-w-full divide-y divide-border">
+        <div v-for="l in logs" :key="l.id" class="group">
+          <div
+            class="flex cursor-pointer items-baseline gap-3 px-3 py-2 whitespace-nowrap hover:bg-surface-2 sm:py-1.5"
+            :class="{ 'bg-danger-soft/40': l.level === 'error', 'just-arrived': arrived.has(l.id), 'bg-surface-2': expanded.has(l.id) }"
+            :aria-expanded="expanded.has(l.id)"
+            @click="toggleExpand(l.id)"
           >
-            user:{{ l.userId }}
-          </button>
-          <button class="hidden w-20 shrink-0 text-right text-faint hover:text-accent sm:block" title="Filter by this server" @click.stop="jobId = l.jobId">
-            {{ shortId(l.jobId) }}
-          </button>
-        </div>
-        <div v-if="expanded.has(l.id)" class="bg-surface-2 px-3 py-2 pl-52">
-          <pre class="whitespace-pre-wrap">{{ JSON.stringify(l.attrs, null, 2) }}</pre>
+            <span class="shrink-0 text-faint tabular-nums sm:w-40" :title="absolute(l.ts)">
+              <span class="sm:hidden">{{ time(l.ts) }}</span>
+              <span class="max-sm:hidden">{{ dateTime(l.ts) }}</span>
+            </span>
+            <span class="w-12 shrink-0 font-semibold uppercase" :class="levelClass[l.level]">{{ l.level }}</span>
+            <span v-if="hasAttrs(l)" class="chip shrink-0">{{ Object.keys(l.attrs).length }} attrs</span>
+            <span class="flex-1 whitespace-pre">{{ l.message }}</span>
+            <button
+              v-if="l.userId"
+              class="hidden shrink-0 text-faint hover:text-accent sm:block"
+              title="Filter by this player"
+              @click.stop="userId = String(l.userId)"
+            >
+              user:{{ l.userId }}
+            </button>
+            <button class="hidden w-20 shrink-0 text-right text-faint hover:text-accent sm:block" title="Filter by this server" @click.stop="jobId = l.jobId">
+              {{ shortId(l.jobId) }}
+            </button>
+          </div>
+          <div v-if="expanded.has(l.id)" class="bg-surface-2 px-3 pt-1 pb-2.5 sm:pl-[15.25rem]">
+            <!-- Actions stay in view while the line scrolls sideways. -->
+            <div class="sticky left-3 flex w-fit flex-wrap gap-1.5 font-sans">
+              <SendButton small :build="() => logSnap(l, pid)" />
+              <button class="btn btn-sm" @click.stop="jobId = l.jobId"><Server class="size-3.5" /> Server {{ shortId(l.jobId) }}</button>
+              <button v-if="l.userId" class="btn btn-sm" @click.stop="userId = String(l.userId)"><User class="size-3.5" /> Player {{ l.userId }}</button>
+            </div>
+            <pre v-if="hasAttrs(l)" class="mt-2 whitespace-pre">{{ JSON.stringify(l.attrs, null, 2) }}</pre>
+          </div>
         </div>
       </div>
     </div>
@@ -209,7 +224,7 @@ const levelClass: Record<string, string> = {
     </div>
   </div>
 
-  <div v-if="jobId || userId" class="fixed right-4 bottom-4 flex gap-2">
+  <div v-if="jobId || userId" class="fixed right-4 bottom-4 z-20 flex gap-2 max-lg:bottom-[calc(5rem+env(safe-area-inset-bottom))]">
     <span v-if="jobId" class="chip border border-border bg-surface py-1 shadow-sm">
       server {{ shortId(jobId) }} <button aria-label="Clear server filter" @click="jobId = ''"><X class="size-3" /></button>
     </span>

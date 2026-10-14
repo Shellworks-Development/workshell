@@ -42,7 +42,7 @@ provideProject({ pid: toRef(props, 'pid'), project, reload })
       </EmptyState>
     </div>
     <RouterView v-else-if="project" v-slot="{ Component, route: r }">
-      <div :key="r.path" class="page-enter">
+      <div :key="r.path" class="page-enter h-full">
         <component :is="Component" />
       </div>
     </RouterView>

@@ -143,6 +143,7 @@ func (s *Server) Handler() http.Handler {
 	proj("GET /api/projects/{pid}/servers/{jobId}", s.handleGetServer)
 	proj("GET /api/projects/{pid}/performance", s.handlePerformance)
 	proj("GET /api/projects/{pid}/performance/spans", s.handleSpanDetail)
+	proj("GET /api/projects/{pid}/traces/{traceId}", s.handleTrace)
 
 	// Releases.
 	proj("GET /api/projects/{pid}/releases", s.handleListReleases)
@@ -162,6 +163,18 @@ func (s *Server) Handler() http.Handler {
 	proj("POST /api/projects/{pid}/events/funnel", s.handleFunnel)
 	proj("GET /api/projects/{pid}/metrics", s.handleListMetrics)
 	proj("GET /api/projects/{pid}/metrics/series", s.handleMetricSeries)
+
+	// Whiteboards and chart annotations.
+	proj("GET /api/projects/{pid}/whiteboards", s.handleListBoards)
+	projectUser("POST /api/projects/{pid}/whiteboards", s.handleCreateBoard)
+	proj("GET /api/projects/{pid}/whiteboards/{bid}", s.handleGetBoard)
+	projectUser("PATCH /api/projects/{pid}/whiteboards/{bid}", s.handleUpdateBoard)
+	projectUser("DELETE /api/projects/{pid}/whiteboards/{bid}", s.handleDeleteBoard)
+	projectUser("POST /api/projects/{pid}/whiteboards/{bid}/items", s.handleBoardItems)
+	projectUser("POST /api/projects/{pid}/whiteboards/{bid}/presence", s.handleBoardPresence)
+	proj("GET /api/projects/{pid}/annotations", s.handleListAnnotations)
+	projectUser("POST /api/projects/{pid}/annotations", s.handleCreateAnnotation)
+	projectUser("DELETE /api/projects/{pid}/annotations/{aid}", s.handleDeleteAnnotation)
 
 	// Alerts.
 	proj("GET /api/projects/{pid}/alerts", s.handleListAlerts)
@@ -222,6 +235,12 @@ func (s *Server) spaHandler() http.Handler {
 				files.ServeHTTP(w, r)
 				return
 			}
+		}
+		// A hashed asset that no longer exists (an old tab after a deploy) must
+		// 404 so the app can recover, not get index.html served as JavaScript.
+		if strings.HasPrefix(p, "assets/") {
+			http.NotFound(w, r)
+			return
 		}
 		index, err := fs.ReadFile(s.web, "index.html")
 		if err != nil {

@@ -16,6 +16,8 @@ import { severityColors } from '@/lib/chartTheme'
 import { num } from '@/lib/format'
 import { useProject } from '@/lib/project'
 import { useAsync } from '@/lib/useAsync'
+import SendButton from '@/components/whiteboard/SendButton.vue'
+import { detectionSnap } from '@/lib/snapshots'
 
 const { pid } = useProject()
 const router = useRouter()
@@ -100,7 +102,7 @@ const series = computed(() => (['low', 'medium', 'high'] as const).map((k) => ({
         <h2 class="section-title">Recent detections</h2>
         <div class="card overflow-x-auto">
           <table class="table">
-            <thead><tr><th>When</th><th>Kind</th><th>Severity</th><th>Player</th><th>Action</th><th>Details</th></tr></thead>
+            <thead><tr><th>When</th><th>Kind</th><th>Severity</th><th>Player</th><th>Action</th><th>Details</th><th class="relative w-0"><span class="sr-only">Send to whiteboard</span></th></tr></thead>
             <tbody>
               <tr v-for="d in data.recent" :key="d.id">
                 <td class="whitespace-nowrap text-muted"><RelTime :ts="d.ts" /></td>
@@ -116,6 +118,7 @@ const series = computed(() => (['low', 'medium', 'high'] as const).map((k) => ({
                 </td>
                 <td class="text-muted">{{ d.action || '—' }}</td>
                 <td class="mono max-w-sm truncate text-muted">{{ Object.keys(d.details).length ? JSON.stringify(d.details) : '' }}</td>
+                <td class="py-1 text-right"><SendButton small icon-only class="btn-ghost text-muted" :build="() => detectionSnap(d, pid)" /></td>
               </tr>
             </tbody>
           </table>

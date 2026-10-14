@@ -96,6 +96,7 @@ type item struct {
 	DurationMs float64 `json:"durationMs"`
 	Status     string  `json:"status"`
 	TraceID    string  `json:"traceId"`
+	SpanID     string  `json:"spanId"`
 	Parent     string  `json:"parent"`
 
 	// detection
@@ -512,6 +513,7 @@ type batchWriter struct {
 	environment  string
 	stmts        map[string]*sql.Stmt
 	res          *ingestResult
+	suspects     map[int64]bool
 }
 
 func (w *batchWriter) exec(query string, args ...any) (sql.Result, error) {
@@ -570,8 +572,84 @@ func (w *batchWriter) allowClient(it *item) (bool, error) {
 		}
 		w.live("detection", map[string]any{"kind": "client_flood", "userId": int64(it.UserID), "severity": "medium", "ts": int64(it.TS)})
 		w.res.triggers = append(w.res.triggers, trigger{Kind: "detection", Title: "client_flood", Detail: fmt.Sprintf("Player %d exceeded %d client reports/minute", it.UserID, int(rate))})
+		if err := w.quarantinePlayer(int64(it.UserID), "client_flood", int64(it.TS)); err != nil {
+			return false, err
+		}
 	}
 	return false, nil
+}
+
+// suspectWindow is how long a flagged player's client reports stay untrusted.
+const suspectWindow = 24 * 60 * 60_000
+
+// isSuspect reports whether a player was flagged (a client flood or any
+// high-severity detection) recently, so their client reports aren't trusted.
+func (w *batchWriter) isSuspect(uid, ts int64) (bool, error) {
+	if uid <= 0 {
+		return false, nil
+	}
+	if v, found := w.suspects[uid]; found {
+		return v, nil
+	}
+	var v bool
+	err := w.tx.QueryRowContext(w.ctx, `SELECT EXISTS (SELECT 1 FROM detections WHERE project_id = ? AND user_id = ? AND ts >= ?
+		AND (kind = 'client_flood' OR severity = 'high'))`, w.p.ID, uid, ts-suspectWindow).Scan(&v)
+	if err != nil {
+		return false, err
+	}
+	if w.suspects == nil {
+		w.suspects = map[int64]bool{}
+	}
+	w.suspects[uid] = v
+	return v, nil
+}
+
+// quarantinePlayer ignores recent client-side issues that only this (now
+// flagged) player has ever reported, so an exploiter can't fill the issue
+// list or fire alerts with made-up errors. They stay under Ignored, with a
+// note explaining why, and can be reopened.
+func (w *batchWriter) quarantinePlayer(uid int64, reason string, ts int64) error {
+	if w.suspects == nil {
+		w.suspects = map[int64]bool{}
+	}
+	w.suspects[uid] = true
+	rows, err := w.tx.QueryContext(w.ctx, `
+		UPDATE issues SET status = 'ignored'
+		WHERE project_id = ? AND side = 'client' AND status = 'unresolved' AND user_count <= 1 AND first_seen >= ?
+			AND id IN (SELECT issue_id FROM issue_users WHERE user_id = ?)
+		RETURNING id`, w.p.ID, ts-suspectWindow, uid)
+	if err != nil {
+		return err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	quarantined := map[int64]bool{}
+	for _, id := range ids {
+		quarantined[id] = true
+		if _, err := w.exec(`INSERT INTO issue_activity (issue_id, kind, data, created_at) VALUES (?, 'quarantine', ?, ?)`,
+			id, fmt.Sprintf(`{"userId":%d,"reason":%q}`, uid, reason), ts); err != nil {
+			return err
+		}
+	}
+	// Drop pending "new issue" alerts for what was just quarantined.
+	if len(quarantined) > 0 {
+		kept := w.res.triggers[:0]
+		for _, t := range w.res.triggers {
+			if !quarantined[t.IssueID] {
+				kept = append(kept, t)
+			}
+		}
+		w.res.triggers = kept
+	}
+	return nil
 }
 
 func (w *batchWriter) write(it *item) error {
@@ -643,10 +721,10 @@ func (w *batchWriter) write(it *item) error {
 		if name == "" || it.DurationMs < 0 || math.IsNaN(it.DurationMs) {
 			return nil
 		}
-		_, err := w.exec(`INSERT INTO spans (project_id, ts, name, duration_ms, status, job_id, session_key, user_id, release, trace_id, parent, attrs)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		_, err := w.exec(`INSERT INTO spans (project_id, ts, name, duration_ms, status, job_id, session_key, user_id, release, trace_id, span_id, parent, attrs)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			w.p.ID, ts, name, math.Min(it.DurationMs, 3_600_000), oneOf(it.Status, "ok", "error", "cancelled"), w.jobID, it.SessionID,
-			nullableUser(uid), w.release, truncate(it.TraceID, 64), truncate(it.Parent, 64), jsonOr(it.Attrs, "{}", 4096))
+			nullableUser(uid), w.release, truncate(it.TraceID, 64), truncate(it.SpanID, 64), truncate(it.Parent, 64), jsonOr(it.Attrs, "{}", 4096))
 		return err
 	case "detection":
 		kind := truncate(strings.TrimSpace(it.Kind), 64)
@@ -661,6 +739,11 @@ func (w *batchWriter) write(it *item) error {
 			w.live("detection", map[string]any{"kind": kind, "userId": nullableUser(uid), "severity": severity, "ts": ts, "action": it.Action})
 			if severity == "high" {
 				w.res.triggers = append(w.res.triggers, trigger{Kind: "detection", Title: kind, Detail: fmt.Sprintf("Player %d · %s severity · %s", uid, severity, oneOfDefault(it.Action, "no action"))})
+				if uid > 0 {
+					if err := w.quarantinePlayer(uid, kind, ts); err != nil {
+						return err
+					}
+				}
 			}
 		}
 		return err
@@ -702,10 +785,20 @@ func (w *batchWriter) writeError(it *item) error {
 
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
+		suspect := false
+		if side == "client" {
+			if suspect, err = w.isSuspect(uid, ts); err != nil {
+				return err
+			}
+		}
+		status = "unresolved"
+		if suspect {
+			status = "ignored"
+		}
 		res, err := w.tx.ExecContext(w.ctx, `
-			INSERT INTO issues (project_id, fingerprint, title, culprit, level, side, first_seen, last_seen, event_count, first_release, last_release)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			w.p.ID, g.Fingerprint, g.Title, g.Culprit, level, side, ts, ts, count, w.release, w.release)
+			INSERT INTO issues (project_id, fingerprint, title, culprit, level, side, status, first_seen, last_seen, event_count, first_release, last_release)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			w.p.ID, g.Fingerprint, g.Title, g.Culprit, level, side, status, ts, ts, count, w.release, w.release)
 		if err != nil {
 			return err
 		}
@@ -714,7 +807,14 @@ func (w *batchWriter) writeError(it *item) error {
 			issueID, fmt.Sprintf(`{"release":%q}`, w.release), ts); err != nil {
 			return err
 		}
-		w.res.triggers = append(w.res.triggers, trigger{Kind: "new_issue", IssueID: issueID, Title: g.Title, Detail: g.Culprit, Release: w.release})
+		if suspect {
+			if _, err := w.exec(`INSERT INTO issue_activity (issue_id, kind, data, created_at) VALUES (?, 'quarantine', ?, ?)`,
+				issueID, fmt.Sprintf(`{"userId":%d,"reason":"flagged player"}`, uid), ts); err != nil {
+				return err
+			}
+		} else {
+			w.res.triggers = append(w.res.triggers, trigger{Kind: "new_issue", IssueID: issueID, Title: g.Title, Detail: g.Culprit, Release: w.release})
+		}
 	case err != nil:
 		return err
 	default:

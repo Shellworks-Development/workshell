@@ -43,8 +43,8 @@ watch([model, () => props.options], () => nextTick(measure))
       role="tab"
       :aria-selected="model === o.value"
       :data-value="o.value"
-      class="relative cursor-pointer rounded-md px-2.5 font-medium text-muted transition-colors duration-150 hover:text-fg"
-      :class="size === 'md' ? 'h-7 text-[13px]' : 'h-6 text-xs'"
+      class="seg-item relative cursor-pointer rounded-md font-medium text-muted transition-colors duration-150 hover:text-fg"
+      :class="size === 'md' ? 'seg-md' : 'seg-sm'"
       @click="model = o.value"
     >
       {{ o.label }}<span v-if="o.count !== undefined" class="tabular ml-1.5 text-faint">{{ o.count }}</span>
@@ -59,8 +59,8 @@ watch([model, () => props.options], () => nextTick(measure))
       <span
         v-for="o in options"
         :key="o.value"
-        class="relative flex items-center rounded-md px-2.5 font-medium text-fg"
-        :class="size === 'md' ? 'h-7 text-[13px]' : 'h-6 text-xs'"
+        class="seg-item relative rounded-md font-medium text-fg"
+        :class="size === 'md' ? 'seg-md' : 'seg-sm'"
       >
         {{ o.label }}<span v-if="o.count !== undefined" class="tabular ml-1.5 text-muted">{{ o.count }}</span>
       </span>

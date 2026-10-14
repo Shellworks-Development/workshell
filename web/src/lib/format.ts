@@ -26,6 +26,14 @@ export function duration(ms: number | null | undefined): string {
   return `${Math.floor(h / 24)}d ${h % 24}h`
 }
 
+/** Span timings: "0.4 ms", "12.5 ms", "230 ms", "1.24 s". */
+export function spanMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '—'
+  if (ms < 10) return `${ms.toFixed(1)} ms`
+  if (ms < 1000) return `${Math.round(ms)} ms`
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`
+}
+
 export function ago(ts: number | null | undefined, now = Date.now()): string {
   if (!ts) return 'never'
   const s = Math.round((now - ts) / 1000)
@@ -84,4 +92,10 @@ export function initials(name: string): string {
     .split(/\s+/)
     .filter(Boolean)
   return ((parts[0]?.[0] ?? '?') + (parts.length > 1 ? parts[parts.length - 1]![0] : '')).toUpperCase()
+}
+
+/** Axis/tooltip formatter that appends a unit: unit('ms')(12) → "12 ms". */
+export function unit(u: string): (v: number) => string {
+  // Tagged so a chart snapshot (Send to whiteboard) can store the unit, not a function.
+  return Object.assign((v: number) => `${num(v)} ${u}`, { unitLabel: u })
 }

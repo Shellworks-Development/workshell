@@ -117,6 +117,28 @@ body {
   border-color: var(--border);
 }
 
+/*
+ * Grid items default to min-width: auto, so one long unbreakable line (an
+ * error message, a job id) widens the whole column past the screen and the
+ * phone zooms the page out. Let grid children shrink so truncation works.
+ */
+.grid > * {
+  min-width: 0;
+}
+
+/*
+ * Wrapped text blocks (error messages, JSON) must break long unbroken tokens
+ * like instance paths instead of running out of their box. break-word (not
+ * anywhere) only breaks when a token can't fit, without shrinking the
+ * element's minimum width — so table columns and flex items keep their size.
+ */
+pre,
+code,
+dd,
+.mono {
+  overflow-wrap: break-word;
+}
+
 /* ---- Mobile platform baseline (see the mobile-native skill) ---------------- */
 html {
   /* No gray flash on tap; controls give their own :active feedback. */
@@ -150,6 +172,47 @@ button,
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
+/*
+ * Touchscreens: fingertips need ~44px targets (vs ~32px for a mouse), so
+ * controls grow on coarse pointers only; desktop density stays the same.
+ */
+@media (pointer: coarse) {
+  /* px, not rem: the root font is 14px, so rem would undershoot. */
+  .btn {
+    height: 40px;
+    padding-inline: 14px;
+    font-size: 14px;
+  }
+  .btn-sm {
+    height: 36px;
+  }
+  .btn-icon {
+    width: 40px;
+    height: 40px;
+  }
+  .input {
+    height: 40px;
+  }
+  .menu-item {
+    min-height: 44px;
+    font-size: 15px;
+    padding-inline: 12px;
+  }
+  .seg-sm,
+  .seg-md {
+    height: 36px;
+    font-size: 14px;
+  }
+  [role='option'] {
+    min-height: 44px;
+    font-size: 15px;
+  }
+  .wb-btn {
+    width: 40px;
+    height: 40px;
+  }
+}
+
 /* iOS zooms into inputs under 16px and never zooms back out. */
 @media (pointer: coarse) {
   input,
@@ -241,7 +304,7 @@ button,
     @apply h-9 border-b border-border px-4 text-xs font-normal whitespace-nowrap text-muted;
   }
   .table td {
-    @apply border-b border-border px-4 py-2.5 align-middle;
+    @apply border-b border-border px-4 py-2.5 align-middle whitespace-nowrap;
   }
   .table tr:last-child td {
     @apply border-b-0;
@@ -262,6 +325,30 @@ button,
   }
   .chip {
     @apply inline-flex items-center gap-1 rounded-md border border-border bg-surface-2 px-1.5 py-px font-mono text-[11.5px] text-muted;
+  }
+  /* Whiteboard floating toolbars. */
+  .wb-bar {
+    @apply rounded-xl border border-border bg-surface/95 shadow-(--shadow-pop) backdrop-blur;
+  }
+  .wb-btn {
+    @apply grid size-9 shrink-0 cursor-pointer place-items-center rounded-lg text-muted transition-[background-color,color,transform] duration-150 ease-(--ease-out) hover:bg-surface-2 hover:text-fg active:scale-95 disabled:pointer-events-none disabled:opacity-35 aria-pressed:bg-accent-soft aria-pressed:text-accent;
+  }
+  .wb-sep {
+    @apply mx-1 h-5 w-px shrink-0 bg-border;
+  }
+  /* Rows in menus and popovers. */
+  .menu-item {
+    @apply flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-surface-2 active:bg-surface-2;
+  }
+  /* Segmented control segments (buttons and their highlight copy must match). */
+  .seg-item {
+    @apply inline-flex shrink-0 items-center justify-center px-2.5 whitespace-nowrap;
+  }
+  .seg-sm {
+    @apply h-6 text-xs;
+  }
+  .seg-md {
+    @apply h-7 text-[13px];
   }
   .kbd {
     @apply inline-grid h-5 min-w-5 place-items-center rounded border border-border bg-surface px-1 font-sans text-[11px] text-muted;
@@ -308,6 +395,18 @@ button,
   from {
     opacity: 0;
     transform: translateY(8px);
+  }
+}
+
+/* Small anchored panels created in place (chart note editor). */
+.pop-in {
+  animation: pop-in 160ms var(--ease-out);
+  transform-origin: top center;
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
   }
 }
 
@@ -374,6 +473,16 @@ button,
   transform: translateY(100%);
 }
 
+/* Count badge changed (e.g. an issue was resolved): a small pop. */
+.badge-pop {
+  animation: badge-pop 280ms var(--ease-out);
+}
+@keyframes badge-pop {
+  40% {
+    transform: scale(1.25);
+  }
+}
+
 /* New lines arriving in live tail: a brief highlight that fades out. */
 .just-arrived {
   animation: arrive 1200ms ease-out;
@@ -406,6 +515,9 @@ button,
   .stagger > *,
   .rise-in {
     animation-name: fade-in;
+  }
+  .badge-pop {
+    animation: none;
   }
   .modal-enter-from,
   .modal-leave-to,

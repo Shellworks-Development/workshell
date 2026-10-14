@@ -11,7 +11,9 @@ import {
   GitPullRequestArrow,
   MoreHorizontal,
   Pencil,
+  Presentation,
   RotateCcw,
+  ShieldAlert,
   Sparkles,
   Trash2,
   TriangleAlert,
@@ -34,8 +36,11 @@ import { api, type Activity, type ErrorEvent, type Issue, type IssueStatus, type
 import { num, shortId, time } from '@/lib/format'
 import { confirmDialog, toast } from '@/lib/overlay'
 import { useProject } from '@/lib/project'
-import { auth } from '@/lib/state'
+import { confetti, originOf } from '@/lib/confetti'
+import { auth, loadProjects } from '@/lib/state'
 import { useAsync } from '@/lib/useAsync'
+import { issueSnap } from '@/lib/snapshots'
+import { sendToWhiteboard } from '@/lib/whiteboard'
 
 const props = defineProps<{ iid: number }>()
 const { pid, project } = useProject()
@@ -130,10 +135,14 @@ async function assign(id: number) {
 
 const busy = ref(false)
 const statusToast: Record<IssueStatus, string> = { resolved: 'Issue resolved', ignored: 'Issue ignored', unresolved: 'Issue reopened' }
-async function setStatus(status: IssueStatus) {
+async function setStatus(status: IssueStatus, e?: Event) {
+  const origin = originOf(e)
   busy.value = true
   try {
     await api.patch(`/projects/${pid.value}/issues/${props.iid}`, { status })
+    if (status === 'resolved') confetti(origin)
+    // Refresh the open-issue badge in the sidebar / tab bar right away.
+    loadProjects().catch(() => {})
     await Promise.all([reload(), loadActivity()])
     toast(statusToast[status], status === 'resolved' ? 'You’ll be alerted if it happens again.' : undefined)
   } catch (e) {
@@ -285,7 +294,7 @@ const levelTone = (l?: string) => (l === 'error' ? 'danger' : l === 'warn' ? 'wa
         </div>
       </div>
       <div class="flex items-center gap-2">
-        <button v-if="issue.status !== 'resolved'" class="btn btn-primary" :disabled="busy" @click="setStatus('resolved')"><CheckCircle2 class="size-4" /> Resolve</button>
+        <button v-if="issue.status !== 'resolved'" class="btn btn-primary" :disabled="busy" @click="setStatus('resolved', $event)"><CheckCircle2 class="size-4" /> Resolve</button>
         <button v-else class="btn" :disabled="busy" @click="setStatus('unresolved')"><RotateCcw class="size-4" /> Reopen</button>
         <button v-if="issue.status === 'unresolved'" class="btn" :disabled="busy" @click="setStatus('ignored')"><EyeOff class="size-4" /> Ignore</button>
         <Popover v-model:open="moreOpen" placement="bottom-end" width="12rem">
@@ -293,10 +302,13 @@ const levelTone = (l?: string) => (l === 'error' ? 'danger' : l === 'warn' ? 'wa
             <button class="btn btn-icon" aria-label="More actions" @click="toggle"><MoreHorizontal class="size-4" /></button>
           </template>
           <div class="p-1 text-[13px]">
-            <button v-if="issue.status === 'ignored'" class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface-2" @click="moreOpen = false; setStatus('unresolved')">
+            <button v-if="issue.status === 'ignored'" class="menu-item" @click="moreOpen = false; setStatus('unresolved')">
               <RotateCcw class="size-4 text-muted" /> Stop ignoring
             </button>
-            <button class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-danger hover:bg-surface-2" @click="remove"><Trash2 class="size-4" /> Delete issue</button>
+            <button class="menu-item" @click="moreOpen = false; sendToWhiteboard(pid, issueSnap(issue, event, pid))">
+              <Presentation class="size-4 text-muted" /> Send to whiteboard
+            </button>
+            <button class="menu-item text-danger" @click="remove"><Trash2 class="size-4" /> Delete issue</button>
           </div>
         </Popover>
       </div>
@@ -442,6 +454,7 @@ const levelTone = (l?: string) => (l === 'error' ? 'danger' : l === 'warn' ? 'wa
                 <span class="relative z-10 grid size-8 shrink-0 place-items-center rounded-full bg-surface-2 text-muted ring-4 ring-bg">
                   <Sparkles v-if="t.a.kind === 'first_seen'" class="size-3.5" />
                   <TriangleAlert v-else-if="t.a.kind === 'regression'" class="size-3.5 text-warning" />
+                  <ShieldAlert v-else-if="t.a.kind === 'quarantine'" class="size-3.5 text-warning" />
                   <UserRoundPlus v-else-if="t.a.kind === 'assign'" class="size-3.5" />
                   <GitPullRequestArrow v-else-if="t.a.kind === 'github'" class="size-3.5" />
                   <CheckCircle2 v-else-if="t.a.data.status === 'resolved'" class="size-3.5 text-success" />
@@ -451,6 +464,11 @@ const levelTone = (l?: string) => (l === 'error' ? 'danger' : l === 'warn' ? 'wa
                   <template v-if="t.a.kind === 'first_seen'">
                     First seen in
                     <RouterLink :to="{ name: 'release', params: { pid, version: t.a.data.release } }" class="mono link text-fg">{{ t.a.data.release || 'unknown release' }}</RouterLink>
+                  </template>
+                  <template v-else-if="t.a.kind === 'quarantine'">
+                    <span class="text-warning">Automatically ignored</span> — only reported by
+                    <RouterLink :to="{ name: 'player', params: { pid, userId: t.a.data.userId } }" class="mono link text-fg">player {{ t.a.data.userId }}</RouterLink>,
+                    who was flagged for <span class="mono text-fg">{{ t.a.data.reason }}</span>
                   </template>
                   <template v-else-if="t.a.kind === 'regression'">
                     <span class="text-warning">Regressed</span> in
@@ -518,13 +536,13 @@ const levelTone = (l?: string) => (l === 'error' ? 'danger' : l === 'warn' ? 'wa
             <h3 class="font-medium text-muted">Assignee</h3>
             <Popover v-model:open="assignOpen" placement="bottom-end" width="15rem">
               <template #trigger="{ toggle }">
-                <button class="text-xs text-muted hover:text-fg" @click="toggle">Edit</button>
+                <button class="btn btn-ghost btn-sm h-6 px-2 text-xs" @click="toggle">Edit</button>
               </template>
               <div class="p-1">
                 <button
                   v-for="u in team.data.value ?? []"
                   :key="u.id"
-                  class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-surface-2"
+                  class="menu-item"
                   @click="assign(u.id)"
                 >
                   <Avatar :name="u.name" :src="u.avatar" :size="20" />
@@ -532,7 +550,7 @@ const levelTone = (l?: string) => (l === 'error' ? 'danger' : l === 'warn' ? 'wa
                   <span v-if="u.id === auth.user?.id" class="text-xs text-faint">you</span>
                 </button>
                 <div class="my-1 border-t border-border" />
-                <button class="w-full rounded-md px-2 py-1.5 text-left text-muted hover:bg-surface-2" @click="assign(0)">Unassign</button>
+                <button class="menu-item text-muted" @click="assign(0)">Unassign</button>
               </div>
             </Popover>
           </div>

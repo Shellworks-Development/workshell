@@ -24,6 +24,12 @@ export interface Toast {
   description?: string
   tone: ToastTone
   duration: number
+  action?: ToastAction
+}
+
+export interface ToastAction {
+  label: string
+  run: () => void
 }
 
 let seq = 0
@@ -48,7 +54,7 @@ export function closeDialog(ok: boolean) {
   d.resolve(ok)
 }
 
-type ToastOptions = { tone?: ToastTone; description?: string; duration?: number }
+type ToastOptions = { tone?: ToastTone; description?: string; duration?: number; action?: ToastAction }
 
 /** toast("Saved") · toast("Saved", "details") · toast("Saved", { tone, description, duration }) */
 export function toast(message: string, optsOrDescription: ToastOptions | string = {}) {
@@ -59,6 +65,7 @@ export function toast(message: string, optsOrDescription: ToastOptions | string 
     description: opts.description,
     tone: opts.tone ?? 'success',
     duration: opts.duration ?? (opts.tone === 'error' ? 6000 : 4000),
+    action: opts.action,
   }
   overlay.toasts.push(t)
   if (overlay.toasts.length > 4) overlay.toasts.shift()

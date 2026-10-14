@@ -10,7 +10,7 @@ import { RouterLink } from 'vue-router'
  */
 function inline(text: string, mentionPath?: (handle: string) => string): (VNode | string)[] {
   const out: (VNode | string)[] = []
-  const re = /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])|(^|[^\w@])@([a-z0-9][a-z0-9_-]{1,31})/g
+  const re = /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])|(^|[^\w@])@([a-z0-9][a-z0-9_-]{0,31})/g
   let last = 0
   let m: RegExpExecArray | null
   while ((m = re.exec(text))) {

@@ -21,6 +21,7 @@ import {
   Server,
   Settings,
   ShieldAlert,
+  Presentation,
   Siren,
   Sun,
   UserRound,
@@ -88,6 +89,7 @@ const projectNav = computed<NavItem[][]>(() => [
     { name: 'metrics', label: 'Metrics', icon: Activity },
   ],
   [
+    { name: 'whiteboards', label: 'Whiteboards', icon: Presentation, match: ['whiteboard'] },
     { name: 'alerts', label: 'Alerts', icon: Siren },
     { name: 'settings', label: 'Settings', icon: Settings },
   ],
@@ -113,6 +115,13 @@ function switchTo(id: number) {
   switcherOpen.value = false
   const keep = typeof route.name === 'string' && props.pid && !['issue', 'server', 'player', 'session', 'release'].includes(route.name)
   router.push({ name: keep ? (route.name as string) : 'overview', params: { pid: id } })
+}
+
+function go(path: string) {
+  menuOpen.value = false
+  inboxOpen.value = false
+  navOpen.value = false
+  router.push(path)
 }
 
 async function logout() {
@@ -186,7 +195,7 @@ const tabs = computed(() => [
             <button
               v-for="p in projects"
               :key="p.id"
-              class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-surface-2"
+              class="menu-item"
               @click="switchTo(p.id)"
             >
               <span class="dot" :class="p.liveServers ? 'bg-success' : 'bg-faint/40'" />
@@ -195,12 +204,8 @@ const tabs = computed(() => [
               <Check v-if="p.id === pid" class="size-3.5 text-fg" />
             </button>
             <div class="my-1 border-t border-border" />
-            <RouterLink to="/" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg" @click="switcherOpen = false">
-              <LayoutGrid class="size-4" /> All projects
-            </RouterLink>
-            <RouterLink to="/?new=1" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg" @click="switcherOpen = false">
-              <Plus class="size-4" /> New project
-            </RouterLink>
+            <button class="menu-item text-muted" @click="switcherOpen = false; go('/')"><LayoutGrid class="size-4" /> All projects</button>
+            <button class="menu-item text-muted" @click="switcherOpen = false; go('/?new=1')"><Plus class="size-4" /> New project</button>
           </div>
         </Popover>
         <button class="btn btn-ghost btn-icon shrink-0 lg:hidden" aria-label="Close menu" @click="navOpen = false"><X class="size-4" /></button>
@@ -213,7 +218,7 @@ const tabs = computed(() => [
         >
           <Search class="size-3.5" />
           <span class="flex-1 text-left">Find…</span>
-          <span class="kbd">⌘K</span>
+          <span class="kbd pointer-coarse:hidden">⌘K</span>
         </button>
       </div>
 
@@ -224,19 +229,19 @@ const tabs = computed(() => [
             v-for="item in group"
             :key="item.name"
             :to="to(item)"
-            class="flex h-8 items-center gap-2.5 rounded-md px-2 text-[13.5px] transition-colors duration-150 pointer-coarse:h-10 pointer-coarse:text-[15px]"
+            class="flex h-8 items-center gap-2.5 rounded-md px-2 text-[13.5px] transition-colors duration-150 pointer-coarse:h-[44px] pointer-coarse:text-[15px]"
             :class="isActive(item) ? 'bg-surface-3 font-medium text-fg' : 'text-muted hover:bg-surface-2 hover:text-fg'"
           >
             <component :is="item.icon" class="size-4 shrink-0" :stroke-width="isActive(item) ? 2.1 : 1.8" />
             <span class="flex-1 truncate">{{ item.label }}</span>
-            <span v-if="item.count" class="tabular rounded-full bg-surface-3 px-1.5 text-[11px] text-muted">{{ item.count }}</span>
+            <span v-if="item.count" :key="item.count" class="badge-pop tabular rounded-full bg-surface-3 px-1.5 text-[11px] text-muted">{{ item.count }}</span>
           </RouterLink>
         </template>
       </nav>
 
       <!-- User -->
       <div class="flex items-center gap-1 border-t border-border p-2.5">
-        <Popover v-model:open="menuOpen" placement="top-start" width="14rem">
+        <Popover v-model:open="menuOpen" placement="top-start" width="16.5rem">
           <template #trigger="{ toggle }">
             <button class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 hover:bg-surface-2" @click="toggle">
               <Avatar :name="auth.user?.name ?? '?'" :src="auth.user?.avatar" :size="24" />
@@ -249,19 +254,16 @@ const tabs = computed(() => [
               <div class="truncate text-xs text-muted">@{{ auth.user?.handle }}</div>
             </div>
             <div class="my-1 border-t border-border" />
-            <RouterLink to="/profile" class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface-2" @click="menuOpen = false">
-              <UserRound class="size-4 text-muted" /> Profile & preferences
-            </RouterLink>
-            <RouterLink to="/team" class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface-2" @click="menuOpen = false">
-              <Users class="size-4 text-muted" /> Team
-            </RouterLink>
+            <button class="menu-item" @click="go('/profile')"><UserRound class="size-4 text-muted" /> Profile & preferences</button>
+            <button class="menu-item" @click="go('/team')"><Users class="size-4 text-muted" /> Team</button>
+            <button class="menu-item" @click="go('/inbox')"><Bell class="size-4 text-muted" /> Inbox</button>
             <div class="flex items-center justify-between gap-2 px-2 py-1.5">
-              <span class="text-muted">Theme</span>
+              <span class="text-muted">Appearance</span>
               <div class="flex rounded-md border border-border p-0.5">
                 <button
                   v-for="t in themes"
                   :key="t.value"
-                  class="grid size-6 cursor-pointer place-items-center rounded"
+                  class="grid size-6 cursor-pointer place-items-center rounded pointer-coarse:size-[40px]"
                   :class="prefs.theme === t.value ? 'bg-surface-3 text-fg' : 'text-faint hover:text-fg'"
                   :title="t.label"
                   :aria-pressed="prefs.theme === t.value"
@@ -271,12 +273,11 @@ const tabs = computed(() => [
                 </button>
               </div>
             </div>
-            <RouterLink to="/profile" class="block px-2 pb-1.5 text-xs text-muted hover:text-fg" @click="menuOpen = false">More themes — Catppuccin, Rosé Pine, Nord…</RouterLink>
-            <button v-if="canInstall" class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-surface-2" @click="menuOpen = false; install()">
+            <button v-if="canInstall" class="menu-item" @click="menuOpen = false; install()">
               <Download class="size-4 text-muted" /> Install app
             </button>
             <div class="my-1 border-t border-border" />
-            <button class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-surface-2" @click="logout">
+            <button class="menu-item" @click="logout">
               <LogOut class="size-4 text-muted" /> Sign out
             </button>
           </div>
@@ -342,7 +343,12 @@ const tabs = computed(() => [
           <slot name="topbar" />
         </div>
       </div>
+      <!-- Full-bleed pages (the whiteboard canvas) fill the space between the bars. -->
+      <div v-if="route.meta.fullBleed" class="wb-page h-[calc(100dvh-3rem-env(safe-area-inset-top)-3.5rem-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-3rem)]">
+        <slot />
+      </div>
       <div
+        v-else
         class="mx-auto max-w-[1240px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8"
         :class="pid ? 'max-lg:pb-[calc(5rem+env(safe-area-inset-bottom))]' : 'max-lg:pb-[calc(1.5rem+env(safe-area-inset-bottom))]'"
       >
@@ -365,7 +371,7 @@ const tabs = computed(() => [
       >
         <component :is="t.icon" class="size-5" :stroke-width="isActive(t) ? 2.2 : 1.8" />
         {{ t.label }}
-        <span v-if="t.count" class="tabular absolute top-1.5 left-[calc(50%+6px)] rounded-full bg-danger px-1 text-[10px] leading-4 text-white">{{ t.count }}</span>
+        <span v-if="t.count" :key="t.count" class="badge-pop tabular absolute top-1.5 left-[calc(50%+6px)] rounded-full bg-danger px-1 text-[10px] leading-4 text-white">{{ t.count }}</span>
       </RouterLink>
       <button
         class="flex h-14 flex-col items-center justify-center gap-0.5 text-[11px] text-faint transition-transform duration-150 ease-(--ease-out) active:scale-95"

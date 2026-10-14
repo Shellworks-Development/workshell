@@ -12,9 +12,11 @@ import Skeleton from '@/components/Skeleton.vue'
 import StatCard from '@/components/StatCard.vue'
 import TimeChart from '@/components/TimeChart.vue'
 import { api, type Issue, type Release, type Timeseries } from '@/lib/api'
-import { duration, num, pct } from '@/lib/format'
+import { duration, num, pct, unit } from '@/lib/format'
 import { useProject } from '@/lib/project'
 import { useAsync } from '@/lib/useAsync'
+import SendButton from '@/components/whiteboard/SendButton.vue'
+import { releaseSnap } from '@/lib/snapshots'
 
 const props = defineProps<{ version: string }>()
 const { pid } = useProject()
@@ -36,6 +38,7 @@ const { data, error } = useAsync(
         <h1 class="mono text-2xl font-semibold tracking-tight">{{ data.release.version }}</h1>
         <Badge v-if="data.release.liveServers" tone="success" dot>Live on {{ data.release.liveServers }} servers</Badge>
         <Badge v-if="data.release.hasSourcemap"><FileCode2 class="size-3" /> Sourcemap</Badge>
+        <SendButton small class="ml-auto" :build="() => releaseSnap(data!.release, pid)" />
       </div>
       <div v-if="data.release.commitSha" class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted">
         <span class="text-fg">{{ data.release.message }}</span>
@@ -61,7 +64,7 @@ const { data, error } = useAsync(
     <div class="card mt-4">
       <div class="card-header"><span class="card-title">Sessions & errors</span><RangePicker v-model="range" :options="['24h', '7d', '30d']" /></div>
       <div class="p-3">
-        <TimeChart :data="data.series" type="line" :series="[{ key: 'sessions', label: 'Sessions' }, { key: 'errors', label: 'Errors', color: 'var(--danger)', right: true }]" />
+        <TimeChart :data="data.series" type="line" :series="[{ key: 'sessions', label: 'Sessions', format: unit('sessions') }, { key: 'errors', label: 'Errors', color: 'var(--danger)', right: true, format: unit('errors') }]" />
       </div>
     </div>
 

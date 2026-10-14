@@ -25,11 +25,11 @@ defineProps<{ frames: Frame[] | null; raw: string }>()
           :href="f.url"
           target="_blank"
           rel="noopener noreferrer"
-          class="mt-0.5 inline-flex items-center gap-1 font-mono text-[11.5px] text-muted"
+          class="mt-0.5 block font-mono text-[11.5px] break-all text-muted"
           :class="f.url ? 'hover:text-fg hover:underline' : ''"
         >
-          <FileCode2 class="size-3" /> {{ f.file }}:{{ f.line }}
-          <ExternalLink v-if="f.url" class="size-3" />
+          <FileCode2 class="mr-1 inline size-3 align-[-2px]" />{{ f.file }}:{{ f.line }}
+          <ExternalLink v-if="f.url" class="ml-1 inline size-3 align-[-2px]" />
         </component>
       </div>
     </div>

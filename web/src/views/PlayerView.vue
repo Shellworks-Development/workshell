@@ -11,6 +11,8 @@ import { api, type Session, type TimelineItem } from '@/lib/api'
 import { duration, num, robux, shortId } from '@/lib/format'
 import { useProject } from '@/lib/project'
 import { useAsync } from '@/lib/useAsync'
+import SendButton from '@/components/whiteboard/SendButton.vue'
+import { playerSnap } from '@/lib/snapshots'
 
 const props = defineProps<{ userId: string }>()
 const { pid } = useProject()
@@ -51,6 +53,7 @@ const { data, error } = useAsync(
         <p class="mt-1 text-[13px] text-muted">First played <RelTime :ts="data.player.firstSeen" /> · last played <RelTime :ts="data.player.lastSeen" /></p>
       </div>
       <div class="flex gap-2">
+        <SendButton small :build="() => playerSnap(data!.player, data!.timeline, pid)" />
         <RouterLink :to="{ name: 'logs', params: { pid }, query: { userId: String(data.player.userId) } }" class="btn btn-sm"><ScrollText class="size-3.5" /> Logs</RouterLink>
         <a v-if="!data.hashedIds" :href="`https://www.roblox.com/users/${data.player.userId}/profile`" target="_blank" rel="noopener noreferrer" class="btn btn-sm">
           <ExternalLink class="size-3.5" /> Roblox profile

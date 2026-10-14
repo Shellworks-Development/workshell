@@ -576,7 +576,7 @@ func (s *Server) handleIssueActivity(w http.ResponseWriter, r *http.Request, p *
 	return ok(w, out)
 }
 
-var mentionPattern = regexp.MustCompile(`(?:^|[^\w@])@([a-z0-9][a-z0-9_-]{1,31})`)
+var mentionPattern = regexp.MustCompile(`(?:^|[^\w@])@([a-z0-9][a-z0-9_-]{0,31})`)
 
 func (s *Server) handleAddComment(w http.ResponseWriter, r *http.Request, p *project, u *user) error {
 	issue, err := s.loadIssue(r, p.ID)

@@ -1,4 +1,4 @@
-.PHONY: build web server dev dev-web test sdk sim clean
+.PHONY: build web server dev dev-web test sdk sim sim-live clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
@@ -33,6 +33,10 @@ sdk:
 ## sim: send a week of fake telemetry (KEY=wsk_... [URL=http://localhost:8080])
 sim:
 	go run ./cmd/workshell-sim -url $(or $(URL),http://localhost:8080) -key $(KEY)
+
+## sim-live: stream live traffic from mock game servers until Ctrl-C (KEY=wsk_... [URL=...] [SERVERS=5])
+sim-live:
+	go run ./cmd/workshell-sim -url $(or $(URL),http://localhost:8080) -key $(KEY) -days 0.03 -servers $(or $(SERVERS),5) -realtime
 
 clean:
 	rm -rf bin web/dist/assets web/dist/index.html web/dist/favicon.svg

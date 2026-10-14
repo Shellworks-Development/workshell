@@ -411,7 +411,7 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request, p *pro
 	rows, err = s.db.R.QueryContext(ctx, `
 		SELECT h.id, h.kind, h.title, h.detail, h.link, h.delivered, h.error, h.created_at, COALESCE(r.name, '')
 		FROM alert_history h LEFT JOIN alert_rules r ON r.id = h.rule_id
-		WHERE h.project_id = ? ORDER BY h.created_at DESC LIMIT 100`, p.ID)
+		WHERE h.project_id = ? ORDER BY h.created_at DESC, h.id DESC LIMIT 100`, p.ID)
 	if err != nil {
 		return err
 	}

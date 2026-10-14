@@ -102,6 +102,18 @@ const iconClass = (t: Toast) => ({ success: 'text-success', error: 'text-danger'
             <div class="text-[13px] font-medium">{{ t.message }}</div>
             <div v-if="t.description" class="mt-0.5 text-xs text-muted">{{ t.description }}</div>
           </div>
+          <button
+            v-if="t.action"
+            class="btn btn-sm -my-1 shrink-0"
+            @click="
+              () => {
+                t.action!.run()
+                dismissToast(t.id)
+              }
+            "
+          >
+            {{ t.action.label }}
+          </button>
           <button class="-mt-0.5 -mr-1 rounded-md p-0.5 text-faint hover:text-fg" aria-label="Dismiss" @click="dismissToast(t.id)">
             <X class="size-3.5" />
           </button>

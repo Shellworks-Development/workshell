@@ -228,7 +228,7 @@ export function seriesOf(ts: Timeseries | undefined | null, name: string): numbe
 
 export interface Activity {
   id: number
-  kind: 'comment' | 'status' | 'assign' | 'github' | 'regression' | 'first_seen'
+  kind: 'comment' | 'status' | 'assign' | 'github' | 'regression' | 'first_seen' | 'quarantine'
   body: string
   data: Record<string, any>
   createdAt: number
@@ -321,3 +321,79 @@ export type LiveMsg =
   | { t: 'session_start'; d: { sessionKey: string; userId: number; ts: number; isNew: boolean } }
   | { t: 'session_end'; d: { sessionKey: string; userId: number; ts: number } }
   | { t: 'detection'; d: { kind: string; userId: number | null; severity: string; ts: number; action?: string } }
+  | { t: 'wb'; d: BoardChange }
+  | { t: 'wb_presence'; d: BoardPresence }
+
+// ---- Whiteboards ------------------------------------------------------------
+
+export interface Whiteboard {
+  id: number
+  title: string
+  description: string
+  createdBy: UserRef | null
+  createdAt: number
+  updatedBy: UserRef | null
+  updatedAt: number
+  itemCount: number
+  preview?: { kind: string; x: number; y: number; w: number; h: number; color?: string }[]
+}
+
+export interface BoardItem {
+  id: string
+  kind: 'sticky' | 'text' | 'shape' | 'connector' | 'embed' | 'frame'
+  x: number
+  y: number
+  w: number
+  h: number
+  z: number
+  data: Record<string, any>
+  rev?: number
+  updatedBy?: number | null
+  updatedAt?: number
+}
+
+export interface BoardChange {
+  board: number
+  by: number
+  client?: string
+  items?: BoardItem[]
+  deleted?: string[]
+  reload?: boolean
+  title?: string
+  description?: string
+  deletedBoard?: boolean
+}
+
+export interface BoardPresence {
+  board: number
+  client: string
+  user: UserRef
+  cursor: [number, number] | null
+  selected: string[]
+  leaving: boolean
+}
+
+export interface ChartAnnotation {
+  id: number
+  chartKey: string
+  ts: number
+  value: number | null
+  series: string
+  text: string
+  author: UserRef | null
+  createdAt: number
+}
+
+export interface TraceSpan {
+  spanId: string
+  parent: string
+  name: string
+  start: number
+  durationMs: number
+  status: string
+  userId: number | null
+  jobId: string
+  sessionKey: string
+  release: string
+  attrs: string
+}

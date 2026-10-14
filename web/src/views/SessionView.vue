@@ -11,9 +11,11 @@ import Skeleton from '@/components/Skeleton.vue'
 import TimeChart from '@/components/TimeChart.vue'
 import Timeline from '@/components/Timeline.vue'
 import { api, type Session, type Timeseries, type TimelineItem } from '@/lib/api'
-import { duration, num, shortId } from '@/lib/format'
+import { duration, num, shortId, unit } from '@/lib/format'
 import { useProject } from '@/lib/project'
 import { useAsync } from '@/lib/useAsync'
+import SendButton from '@/components/whiteboard/SendButton.vue'
+import { sessionSnap } from '@/lib/snapshots'
 
 const props = defineProps<{ sid: string }>()
 const { pid } = useProject()
@@ -80,16 +82,28 @@ const perfSeries = computed<Timeseries | null>(() => {
       </div>
       <div class="flex gap-2">
         <CopyButton :text="data.session.key" label="Copy session id" />
+        <SendButton small :build="() => sessionSnap(data!.session, data!.timeline, pid)" />
         <RouterLink :to="{ name: 'logs', params: { pid }, query: { userId: String(data.session.userId) } }" class="btn btn-sm"><ScrollText class="size-3.5" /> Logs</RouterLink>
       </div>
     </div>
 
     <div class="grid gap-8 lg:grid-cols-[1fr_17rem]">
       <div class="min-w-0 space-y-5">
-        <div v-if="perfSeries" class="card">
-          <div class="card-header"><span class="card-title">Client performance</span></div>
-          <div class="p-3">
-            <TimeChart :data="perfSeries" type="line" :height="150" :series="[{ key: 'fps', label: 'FPS' }, { key: 'pingMs', label: 'Ping ms' }, { key: 'memoryMb', label: 'Memory MB', right: true }]" />
+        <div v-if="perfSeries" class="grid gap-3 md:grid-cols-2">
+          <div class="card">
+            <div class="card-header"><span class="card-title">Frame rate &amp; ping</span></div>
+            <div class="p-3">
+              <TimeChart
+                :data="perfSeries"
+                type="line"
+                :height="150"
+                :series="[{ key: 'fps', label: 'FPS', format: unit('fps') }, { key: 'pingMs', label: 'Ping', right: true, format: unit('ms') }]"
+              />
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">Client memory</span></div>
+            <div class="p-3"><TimeChart :data="perfSeries" type="line" :height="150" :series="[{ key: 'memoryMb', label: 'Memory', format: unit('MB') }]" /></div>
           </div>
         </div>
 

@@ -341,7 +341,7 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request, u *use
 	return ok(w, map[string]any{"ok": true})
 }
 
-var handlePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,31}$`)
+var handlePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
 // uniqueHandle derives an @handle from an email address, adding a number if taken.
 func (s *Server) uniqueHandle(r *http.Request, email string) (string, error) {
@@ -352,8 +352,8 @@ func (s *Server) uniqueHandle(r *http.Request, email string) (string, error) {
 		}
 		return -1
 	}, local)
-	if len(base) < 2 {
-		base = "user" + base
+	if base == "" {
+		base = "user"
 	}
 	if len(base) > 24 {
 		base = base[:24]
@@ -396,7 +396,7 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request, u *
 	if body.Handle != nil {
 		h := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(*body.Handle), "@"))
 		if !handlePattern.MatchString(h) {
-			return badRequest("handles are 2-32 characters: lowercase letters, numbers, - and _")
+			return badRequest("handles are 1-32 characters: lowercase letters, numbers, - and _")
 		}
 		var n int
 		if err := s.db.R.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM users WHERE handle = ? AND id != ?`, h, u.ID).Scan(&n); err != nil {
@@ -480,7 +480,7 @@ func (s *Server) handleGetUser(w http.ResponseWriter, r *http.Request, _ *user) 
 	recent := []activity{}
 	rows, err = s.db.R.QueryContext(r.Context(), `
 		SELECT a.kind, a.body, a.created_at, i.id, i.project_id, i.title FROM issue_activity a JOIN issues i ON i.id = a.issue_id
-		WHERE a.user_id = ? ORDER BY a.created_at DESC LIMIT 30`, id)
+		WHERE a.user_id = ? ORDER BY a.created_at DESC, a.id DESC LIMIT 30`, id)
 	if err != nil {
 		return err
 	}
@@ -503,7 +503,7 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request, u *
 		FROM notifications n
 		LEFT JOIN issues i ON i.id = n.issue_id
 		LEFT JOIN users a ON a.id = n.actor_id
-		WHERE n.user_id = ? ORDER BY n.created_at DESC LIMIT 50`, u.ID)
+		WHERE n.user_id = ? ORDER BY n.created_at DESC, n.id DESC LIMIT 50`, u.ID)
 	if err != nil {
 		return err
 	}

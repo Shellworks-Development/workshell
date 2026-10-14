@@ -827,6 +827,7 @@ function Server.startSpan(name: string, opts: { player: Player?, attrs: { [strin
 			status = status or "ok",
 			userId = userIdOf(o.player),
 			traceId = o.traceId or id,
+			spanId = id,
 			parent = o.parent,
 			attrs = Shared.dict(attrs),
 		})

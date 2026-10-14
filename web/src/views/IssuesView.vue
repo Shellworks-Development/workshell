@@ -13,11 +13,16 @@ import Segmented from '@/components/Segmented.vue'
 import Select from '@/components/Select.vue'
 import Skeleton from '@/components/Skeleton.vue'
 import Sparkline from '@/components/Sparkline.vue'
-import { api, type Issue, type IssueStatus } from '@/lib/api'
+import { api, type BoardItem, type Issue, type IssueStatus } from '@/lib/api'
 import { num } from '@/lib/format'
+import { confetti, originOf } from '@/lib/confetti'
 import { confirmDialog, toast } from '@/lib/overlay'
 import { useProject } from '@/lib/project'
+import { loadProjects } from '@/lib/state'
 import { useAsync } from '@/lib/useAsync'
+import SendButton from '@/components/whiteboard/SendButton.vue'
+import { issueSnap } from '@/lib/snapshots'
+import { embedItem } from '@/lib/whiteboard'
 
 const { pid } = useProject()
 const router = useRouter()
@@ -70,7 +75,19 @@ function toggle(id: number) {
 }
 
 const busy = ref(false)
-async function bulk(body: { status?: IssueStatus; delete?: boolean }) {
+// Selected issues go to a board as a grid of cards.
+function sendSelected(): BoardItem[] {
+  const list = (data.value?.issues ?? []).filter((i) => selected.value.has(i.id))
+  return list.map((i, n) => {
+    const it = embedItem(issueSnap(i, null, pid.value))
+    it.x = (n % 3) * (it.w + 32)
+    it.y = Math.floor(n / 3) * (it.h + 32)
+    return it
+  })
+}
+
+async function bulk(body: { status?: IssueStatus; delete?: boolean }, e?: Event) {
+  const origin = originOf(e)
   const n = selected.value.size
   const noun = `${n} issue${n === 1 ? '' : 's'}`
   if (
@@ -86,7 +103,9 @@ async function bulk(body: { status?: IssueStatus; delete?: boolean }) {
   busy.value = true
   try {
     await api.post(`/projects/${pid.value}/issues/bulk`, { ids: [...selected.value], ...body })
+    if (body.status === 'resolved') confetti(origin, Math.min(40 + n * 10, 140))
     selected.value.clear()
+    loadProjects().catch(() => {})
     await reload()
     toast(body.delete ? `Deleted ${noun}` : `Marked ${noun} as ${body.status}`)
   } catch (e) {
@@ -155,9 +174,10 @@ const assigneeOptions = [
       <input type="checkbox" class="size-3.5 accent-(--fg)" :checked="allSelected" aria-label="Select all" @change="toggleAll" />
       <template v-if="selected.size > 0">
         <span class="rise-in mr-1">{{ selected.size }} selected</span>
-        <button v-if="status !== 'resolved'" class="btn btn-sm" :disabled="busy" @click="bulk({ status: 'resolved' })"><CheckCircle2 class="size-3.5" /> Resolve</button>
+        <button v-if="status !== 'resolved'" class="btn btn-sm" :disabled="busy" @click="bulk({ status: 'resolved' }, $event)"><CheckCircle2 class="size-3.5" /> Resolve</button>
         <button v-if="status !== 'ignored'" class="btn btn-sm" :disabled="busy" @click="bulk({ status: 'ignored' })"><EyeOff class="size-3.5" /> Ignore</button>
         <button v-if="status !== 'unresolved'" class="btn btn-sm" :disabled="busy" @click="bulk({ status: 'unresolved' })"><RotateCcw class="size-3.5" /> Reopen</button>
+        <SendButton small label="Whiteboard" :build="sendSelected" />
         <button class="btn btn-sm text-danger" :disabled="busy" @click="bulk({ delete: true })"><Trash2 class="size-3.5" /> Delete</button>
       </template>
       <template v-else>

@@ -11,7 +11,7 @@ import Segmented from '@/components/Segmented.vue'
 import StatCard from '@/components/StatCard.vue'
 import TimeChart from '@/components/TimeChart.vue'
 import { api, seriesOf, type GameServer, type Timeseries } from '@/lib/api'
-import { ago, duration, num, shortId } from '@/lib/format'
+import { ago, duration, num, shortId, unit } from '@/lib/format'
 import { useProject } from '@/lib/project'
 import { useAsync } from '@/lib/useAsync'
 
@@ -64,23 +64,22 @@ function fpsTone(fps: number) {
         <TimeChart
           :data="playersAndServers"
           type="line"
-          :series="[{ key: 'players', label: 'Players' }, { key: 'servers', label: 'Servers' }]"
+          :height="190"
+          :series="[{ key: 'players', label: 'Players', format: unit('players') }, { key: 'servers', label: 'Servers', right: true, format: unit('servers') }]"
         />
       </div>
     </div>
     <div class="card">
-      <div class="card-header"><span class="card-title">Performance (avg across servers)</span></div>
-      <div class="p-3">
-        <TimeChart
-          :data="stats.data.value?.health"
-          type="line"
-          :series="[
-            { key: 'fps', label: 'FPS' },
-            { key: 'heartbeatMs', label: 'Heartbeat ms' },
-            { key: 'pingMs', label: 'Ping ms' },
-          ]"
-        />
-      </div>
+      <div class="card-header"><span class="card-title">Server frame rate</span><span class="text-xs text-muted">avg across servers</span></div>
+      <div class="p-3"><TimeChart :data="stats.data.value?.health" type="line" :height="190" :series="[{ key: 'fps', label: 'Server FPS', format: unit('fps') }]" /></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">Heartbeat time</span><span class="text-xs text-muted">time per server frame</span></div>
+      <div class="p-3"><TimeChart :data="stats.data.value?.health" type="line" :height="190" :series="[{ key: 'heartbeatMs', label: 'Heartbeat', format: unit('ms') }]" /></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">Player ping</span><span class="text-xs text-muted">round trip</span></div>
+      <div class="p-3"><TimeChart :data="stats.data.value?.health" type="line" :height="190" :series="[{ key: 'pingMs', label: 'Ping', format: unit('ms') }]" /></div>
     </div>
   </div>
 

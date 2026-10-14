@@ -49,6 +49,12 @@ export const router = createRouter({
         page('analytics', 'Analytics', () => import('./views/AnalyticsView.vue')),
         page('events', 'Events', () => import('./views/EventsView.vue')),
         page('metrics', 'Metrics', () => import('./views/MetricsView.vue')),
+        page('whiteboards', 'Whiteboards', () => import('./views/WhiteboardsView.vue')),
+        {
+          ...page('whiteboard', 'Whiteboard', () => import('./views/WhiteboardView.vue'), 'whiteboards/:bid'),
+          props: (r: any) => ({ bid: Number(r.params.bid), focus: typeof r.query.focus === 'string' ? r.query.focus : undefined }),
+          meta: { title: 'Whiteboard', fullBleed: true },
+        },
         page('alerts', 'Alerts', () => import('./views/AlertsView.vue')),
         page('settings', 'Settings', () => import('./views/ProjectSettingsView.vue')),
       ],
@@ -75,4 +81,30 @@ setUnauthorizedHandler(() => {
   auth.user = null
   const current = router.currentRoute.value
   if (!current.meta.public) router.replace({ path: '/login', query: { next: current.fullPath } })
+})
+
+// After a deploy, an open tab still references the previous build's page
+// chunks, which no longer exist. Instead of navigation silently failing,
+// reload into the new build at the page the user was going to (once).
+function isChunkError(err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /dynamically imported module|Importing a module script failed|module script|Failed to fetch/i.test(msg)
+}
+router.onError((err, to) => {
+  if (!isChunkError(err)) return
+  const key = 'workshell-reloaded-for'
+  if (sessionStorage.getItem(key) === to.fullPath) return // already tried; don't loop
+  sessionStorage.setItem(key, to.fullPath)
+  window.location.assign(to.fullPath)
+})
+window.addEventListener('vite:preloadError', (e) => {
+  e.preventDefault()
+  window.location.reload()
+})
+router.afterEach(() => {
+  try {
+    sessionStorage.removeItem('workshell-reloaded-for')
+  } catch {
+    // ignore
+  }
 })

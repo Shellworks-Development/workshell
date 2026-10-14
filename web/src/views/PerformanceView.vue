@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Timer, X } from 'lucide-vue-next'
+import { Network, Timer, X } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Badge from '@/components/Badge.vue'
@@ -11,9 +11,10 @@ import RelTime from '@/components/RelTime.vue'
 import Skeleton from '@/components/Skeleton.vue'
 import TimeChart from '@/components/TimeChart.vue'
 import { api, type Timeseries } from '@/lib/api'
-import { num, pct, shortId } from '@/lib/format'
+import { num, pct, shortId, unit } from '@/lib/format'
 import { useProject } from '@/lib/project'
 import { useAsync } from '@/lib/useAsync'
+import TraceDialog from '@/components/TraceDialog.vue'
 
 const { pid } = useProject()
 const route = useRoute()
@@ -44,17 +45,19 @@ function select(name: string) {
 }
 interface SpanDetail {
   series: Timeseries
-  slowest: { ts: number; durationMs: number; status: string; sessionKey: string; userId: number | null; jobId: string; release: string }[]
+  slowest: { ts: number; durationMs: number; status: string; sessionKey: string; userId: number | null; jobId: string; release: string; traceId: string }[]
   releases: { release: string; count: number; avgMs: number }[]
 }
 const detail = useAsync(
   async () => (selected.value ? api.get<SpanDetail>(`/projects/${pid.value}/performance/spans`, { name: selected.value, range: range.value }) : null),
   [pid, selected, range],
 )
+const traceId = ref<string | null>(null)
 const ms = (v: number) => (v >= 1000 ? `${num(v / 1000)} s` : `${num(v)} ms`)
 </script>
 
 <template>
+  <TraceDialog :trace-id="traceId" @close="traceId = null" />
   <PageHeader title="Performance" subtitle="Traced operations, client frame rate and ping, and server health.">
     <RangePicker v-model="range" :options="['1h', '24h', '7d', '30d']" />
   </PageHeader>
@@ -106,6 +109,7 @@ const ms = (v: number) => (v >= 1000 ? `${num(v / 1000)} s` : `${num(v)} ms`)
                   <span v-else class="mono text-faint">server {{ shortId(s.jobId) }}</span>
                   <span class="mono text-faint">{{ s.release }}</span>
                   <span class="ml-auto text-xs text-faint"><RelTime :ts="s.ts" /></span>
+                  <button v-if="s.traceId" class="btn btn-sm -my-1 shrink-0" @click="traceId = s.traceId"><Network class="size-3.5" /> Trace</button>
                 </div>
               </div>
             </div>
@@ -127,13 +131,13 @@ const ms = (v: number) => (v >= 1000 ? `${num(v / 1000)} s` : `${num(v)} ms`)
       <div class="card">
         <div class="card-header"><span class="card-title">Client frame rate & ping</span></div>
         <div class="p-3">
-          <TimeChart :data="data.client" type="line" :series="[{ key: 'fps', label: 'FPS' }, { key: 'pingMs', label: 'Ping ms', right: true }]" />
+          <TimeChart :data="data.client" type="line" :series="[{ key: 'fps', label: 'FPS', format: unit('fps') }, { key: 'pingMs', label: 'Ping', right: true, format: unit('ms') }]" />
         </div>
       </div>
       <div class="card">
         <div class="card-header"><span class="card-title">Server frame rate & heartbeat</span></div>
         <div class="p-3">
-          <TimeChart :data="data.server" type="line" :series="[{ key: 'fps', label: 'Server FPS' }, { key: 'heartbeatMs', label: 'Heartbeat ms', right: true }]" />
+          <TimeChart :data="data.server" type="line" :series="[{ key: 'fps', label: 'Server FPS', format: unit('fps') }, { key: 'heartbeatMs', label: 'Heartbeat', right: true, format: unit('ms') }]" />
         </div>
       </div>
     </div>

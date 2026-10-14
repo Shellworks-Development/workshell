@@ -175,16 +175,17 @@ func (s *Server) handleSpanDetail(w http.ResponseWriter, r *http.Request, p *pro
 		JobID      string  `json:"jobId"`
 		Release    string  `json:"release"`
 		Attrs      string  `json:"attrs"`
+		TraceID    string  `json:"traceId"`
 	}
 	slowest := []slow{}
-	rows, err = s.db.R.QueryContext(r.Context(), `SELECT ts, duration_ms, status, session_key, user_id, job_id, release, attrs FROM spans
+	rows, err = s.db.R.QueryContext(r.Context(), `SELECT ts, duration_ms, status, session_key, user_id, job_id, release, attrs, trace_id FROM spans
 		WHERE project_id = ? AND name = ? AND ts >= ? AND ts < ? ORDER BY duration_ms DESC LIMIT 20`, p.ID, name, tr.From, tr.To)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var x slow
-		if err := rows.Scan(&x.TS, &x.DurationMs, &x.Status, &x.SessionKey, &x.UserID, &x.JobID, &x.Release, &x.Attrs); err != nil {
+		if err := rows.Scan(&x.TS, &x.DurationMs, &x.Status, &x.SessionKey, &x.UserID, &x.JobID, &x.Release, &x.Attrs, &x.TraceID); err != nil {
 			rows.Close()
 			return err
 		}
@@ -212,4 +213,50 @@ func (s *Server) handleSpanDetail(w http.ResponseWriter, r *http.Request, p *pro
 		releases = append(releases, x)
 	}
 	return ok(w, map[string]any{"series": ts, "slowest": slowest, "releases": releases})
+}
+
+// handleTrace returns every span in one trace, for drawing it as a tree.
+// A span's ts is when it finished, so it started at ts - duration.
+func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request, p *project) error {
+	traceID := r.PathValue("traceId")
+	if traceID == "" || len(traceID) > 64 {
+		return errNotFound
+	}
+	type span struct {
+		SpanID     string  `json:"spanId"`
+		Parent     string  `json:"parent"`
+		Name       string  `json:"name"`
+		Start      float64 `json:"start"`
+		DurationMs float64 `json:"durationMs"`
+		Status     string  `json:"status"`
+		UserID     *int64  `json:"userId"`
+		JobID      string  `json:"jobId"`
+		SessionKey string  `json:"sessionKey"`
+		Release    string  `json:"release"`
+		Attrs      string  `json:"attrs"`
+	}
+	rows, err := s.db.R.QueryContext(r.Context(), `SELECT span_id, parent, name, ts, duration_ms, status, user_id, job_id, session_key, release, attrs
+		FROM spans WHERE project_id = ? AND trace_id = ? ORDER BY ts - duration_ms LIMIT 500`, p.ID, traceID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	spans := []span{}
+	for rows.Next() {
+		var x span
+		var ts int64
+		if err := rows.Scan(&x.SpanID, &x.Parent, &x.Name, &ts, &x.DurationMs, &x.Status, &x.UserID, &x.JobID, &x.SessionKey, &x.Release, &x.Attrs); err != nil {
+			return err
+		}
+		x.Start = float64(ts) - x.DurationMs
+		// Spans from older SDKs have no id of their own; the root's id is the trace id.
+		if x.SpanID == "" && x.Parent == "" {
+			x.SpanID = traceID
+		}
+		spans = append(spans, x)
+	}
+	if len(spans) == 0 {
+		return errNotFound
+	}
+	return ok(w, map[string]any{"traceId": traceID, "spans": spans})
 }

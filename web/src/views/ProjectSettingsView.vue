@@ -3,6 +3,7 @@ import { Download, Eye, EyeOff, KeyRound, RefreshCw, Trash2 } from 'lucide-vue-n
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Badge from '@/components/Badge.vue'
+import CodeBlock from '@/components/CodeBlock.vue'
 import CopyButton from '@/components/CopyButton.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import RelTime from '@/components/RelTime.vue'
@@ -128,8 +129,7 @@ const audit = useAsync(
 const baseUrl = computed(() => (auth.publicUrl || window.location.origin).replace(/\/+$/, ''))
 const isLocal = computed(() => /localhost|127\.0\.0\.1|0\.0\.0\.0/.test(baseUrl.value))
 const initSnippet = computed(
-  () => `-- ServerScriptService/Workshell.server.luau
-local Workshell = require(game.ReplicatedStorage.Workshell)
+  () => `local Workshell = require(game.ReplicatedStorage.Workshell)
 
 Workshell.init({
 	url = "${baseUrl.value}",
@@ -141,8 +141,7 @@ const secretSnippet = computed(
 -- (Game Settings → Security → Secrets, name "workshell_key"):
 key = game:GetService("HttpService"):GetSecret("workshell_key"),`,
 )
-const clientSnippet = `-- StarterPlayerScripts/Workshell.client.luau
--- Enables client errors, device info and client FPS/ping/memory.
+const clientSnippet = `-- Enables client errors, device info and client FPS/ping/memory.
 require(game.ReplicatedStorage.Workshell)`
 const releaseSnippet = computed(
   () => `# In CI, before \`rojo build\`: writes the release module and uploads
@@ -231,43 +230,40 @@ end })                                                        -- rate limit + va
               <li class="flex gap-3">
                 <span class="grid size-6 shrink-0 place-items-center rounded-full border border-border text-xs font-medium">3</span>
                 <div class="min-w-0 flex-1">
-                  <div class="flex items-center justify-between gap-2"><span class="font-medium">Start it from a server Script</span><CopyButton :text="initSnippet" /></div>
-                  <pre class="mono mt-2 overflow-x-auto rounded-lg border border-border bg-surface-2 p-3">{{ initSnippet }}</pre>
+                  <div class="font-medium">Start it from a server Script</div>
+                  <CodeBlock :code="initSnippet" :secrets="[project?.ingestKey ?? '', project?.signingSecret ?? '']" title="ServerScriptService/Workshell.server.luau" class="mt-2" />
                   <p v-if="isLocal" class="mt-2 text-warning">
                     Roblox servers can't reach localhost. Expose Workshell on a public HTTPS URL and set <code class="mono">WORKSHELL_PUBLIC_URL</code>.
                   </p>
                   <details class="mt-2 text-muted">
                     <summary class="cursor-pointer select-none hover:text-fg">Keep the key in Roblox Secrets instead</summary>
-                    <pre class="mono mt-2 overflow-x-auto rounded-lg border border-border bg-surface-2 p-3">{{ secretSnippet }}</pre>
+                    <CodeBlock :code="secretSnippet" class="mt-2" />
                   </details>
                 </div>
               </li>
               <li class="flex gap-3">
                 <span class="grid size-6 shrink-0 place-items-center rounded-full border border-border text-xs font-medium text-muted">4</span>
                 <div class="min-w-0 flex-1">
-                  <div class="flex items-center justify-between gap-2"><span class="font-medium">Optional: the client side</span><CopyButton :text="clientSnippet" /></div>
-                  <pre class="mono mt-2 overflow-x-auto rounded-lg border border-border bg-surface-2 p-3">{{ clientSnippet }}</pre>
+                  <div class="font-medium">Optional: the client side</div>
+                  <CodeBlock :code="clientSnippet" title="StarterPlayerScripts/Workshell.client.luau" class="mt-2" />
                 </div>
               </li>
               <li class="flex gap-3">
                 <span class="grid size-6 shrink-0 place-items-center rounded-full border border-border text-xs font-medium text-muted">5</span>
                 <div class="min-w-0 flex-1">
-                  <div class="flex items-center justify-between gap-2"><span class="font-medium">Optional: releases from Rojo projects</span><CopyButton :text="releaseSnippet" /></div>
+                  <div class="font-medium">Optional: releases from Rojo projects</div>
                   <p class="mt-1 text-muted">
                     Tags every error with its git commit (“issue introduced in <span class="mono">a1b2c3d</span>”) and resolves stack frames to your source files.
                   </p>
-                  <pre class="mono mt-2 overflow-x-auto rounded-lg border border-border bg-surface-2 p-3">{{ releaseSnippet }}</pre>
+                  <CodeBlock :code="releaseSnippet" lang="sh" :secrets="[project?.ingestKey ?? '', project?.signingSecret ?? '']" title="CI" class="mt-2" />
                 </div>
               </li>
             </ol>
           </div>
         </div>
         <div class="card p-5">
-          <div class="flex items-center justify-between gap-2">
-            <h2 class="text-base font-semibold">API at a glance</h2>
-            <CopyButton :text="apiSnippet" />
-          </div>
-          <pre class="mono mt-3 overflow-x-auto rounded-lg border border-border bg-surface-2 p-3">{{ apiSnippet }}</pre>
+          <h2 class="text-base font-semibold">API at a glance</h2>
+          <CodeBlock :code="apiSnippet" class="mt-3" />
         </div>
       </template>
 

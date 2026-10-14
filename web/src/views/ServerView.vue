@@ -9,9 +9,11 @@ import RangePicker from '@/components/RangePicker.vue'
 import StatCard from '@/components/StatCard.vue'
 import TimeChart from '@/components/TimeChart.vue'
 import { api, type GameServer, type Timeseries } from '@/lib/api'
-import { ago, dateTime, duration, num } from '@/lib/format'
+import { ago, dateTime, duration, num, unit } from '@/lib/format'
 import { useProject } from '@/lib/project'
 import { useAsync } from '@/lib/useAsync'
+import SendButton from '@/components/whiteboard/SendButton.vue'
+import { serverSnap } from '@/lib/snapshots'
 
 const props = defineProps<{ jobId: string }>()
 const { pid } = useProject()
@@ -59,6 +61,7 @@ function joinUrl(s: GameServer) {
       </div>
       <div class="flex flex-wrap gap-2">
         <CopyButton :text="data.server.jobId" label="Copy job id" />
+        <SendButton small :build="() => serverSnap(data!.server, data!, pid)" />
         <RouterLink :to="{ name: 'logs', params: { pid }, query: { jobId: data.server.jobId } }" class="btn btn-sm">
           <ScrollText class="size-3.5" /> Logs
         </RouterLink>
@@ -84,13 +87,15 @@ function joinUrl(s: GameServer) {
     <div class="grid gap-3 lg:grid-cols-2">
       <div class="card">
         <div class="card-header"><span class="card-title">Players</span></div>
-        <div class="p-3"><TimeChart :data="data.players" :series="[{ key: 'players', label: 'Players' }]" :height="180" /></div>
+        <div class="p-3"><TimeChart :data="data.players" :height="170" :series="[{ key: 'players', label: 'Players', format: unit('players') }]" /></div>
       </div>
       <div class="card">
         <div class="card-header"><span class="card-title">Frame rate</span></div>
-        <div class="p-3">
-          <TimeChart :data="data.health" type="line" :height="180" :series="[{ key: 'fps', label: 'FPS' }, { key: 'heartbeatMs', label: 'Heartbeat ms' }]" />
-        </div>
+        <div class="p-3"><TimeChart :data="data.health" type="line" :height="170" :series="[{ key: 'fps', label: 'FPS', format: unit('fps') }]" /></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Heartbeat time</span></div>
+        <div class="p-3"><TimeChart :data="data.health" type="line" :height="170" :series="[{ key: 'heartbeatMs', label: 'Heartbeat', format: unit('ms') }]" /></div>
       </div>
       <div class="card">
         <div class="card-header"><span class="card-title">Memory &amp; instances</span></div>
@@ -98,8 +103,8 @@ function joinUrl(s: GameServer) {
           <TimeChart
             :data="data.health"
             type="line"
-            :height="180"
-            :series="[{ key: 'memoryMb', label: 'Memory MB' }, { key: 'instances', label: 'Instances', right: true }]"
+            :height="170"
+            :series="[{ key: 'memoryMb', label: 'Memory', format: unit('MB') }, { key: 'instances', label: 'Instances', right: true, format: unit('inst.') }]"
           />
         </div>
       </div>
@@ -109,10 +114,14 @@ function joinUrl(s: GameServer) {
           <TimeChart
             :data="data.health"
             type="line"
-            :height="180"
-            :series="[{ key: 'sendKbps', label: 'Send KB/s' }, { key: 'recvKbps', label: 'Receive KB/s' }, { key: 'pingMs', label: 'Ping ms' }]"
+            :height="170"
+            :series="[{ key: 'sendKbps', label: 'Sent', format: unit('KB/s') }, { key: 'recvKbps', label: 'Received', format: unit('KB/s') }]"
           />
         </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Player ping</span></div>
+        <div class="p-3"><TimeChart :data="data.health" type="line" :height="170" :series="[{ key: 'pingMs', label: 'Ping', format: unit('ms') }]" /></div>
       </div>
     </div>
 

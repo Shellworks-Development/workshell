@@ -77,8 +77,34 @@ func TestClientFloodIsLimitedAndFlagged(t *testing.T) {
 	e.ingest(key, map[string]any{"server": map[string]any{"jobId": "j"}, "items": items})
 	var issues struct{ Issues []issueRow }
 	e.do("GET", base+"/issues?limit=100", nil, &issues)
-	if len(issues.Issues) > 5 {
-		t.Fatalf("client items beyond the per-player budget should be dropped; got %d issues", len(issues.Issues))
+	if len(issues.Issues) != 0 {
+		t.Fatalf("a flooding player's issues shouldn't stay in the unresolved list; got %d", len(issues.Issues))
+	}
+	e.do("GET", base+"/issues?status=ignored&limit=100", nil, &issues)
+	if len(issues.Issues) == 0 || len(issues.Issues) > 5 {
+		t.Fatalf("expected the few issues that got through to be auto-ignored; got %d", len(issues.Issues))
+	}
+	var activity []activityRow
+	e.do("GET", base+"/issues/"+itoa(issues.Issues[0].ID)+"/activity", nil, &activity)
+	if activity[len(activity)-1].Kind != "quarantine" {
+		t.Fatalf("expected a quarantine note, got %+v", activity)
+	}
+
+	// A legitimate client error from someone else is unaffected.
+	e.ingest(key, map[string]any{"server": map[string]any{"jobId": "j"}, "items": []any{
+		map[string]any{"type": "error", "side": "client", "userId": 10, "message": "real client bug"},
+	}})
+	e.do("GET", base+"/issues", nil, &issues)
+	if len(issues.Issues) != 1 || issues.Issues[0].Title != "real client bug" {
+		t.Fatalf("legitimate client issue should stay open: %+v", issues.Issues)
+	}
+	// And the flagged player's later client errors start out ignored.
+	e.ingest(key, map[string]any{"server": map[string]any{"jobId": "j"}, "items": []any{
+		map[string]any{"type": "error", "side": "client", "userId": 9, "message": "totally real error, trust me", "ts": time.Now().Add(2 * time.Minute).UnixMilli()},
+	}})
+	e.do("GET", base+"/issues", nil, &issues)
+	if len(issues.Issues) != 1 {
+		t.Fatalf("flagged player's new client issue should start ignored: %+v", issues.Issues)
 	}
 	var sec struct {
 		Recent []detectionRow
@@ -212,5 +238,33 @@ func TestSessionTimeline(t *testing.T) {
 	}
 	if res.Session.ErrorCount != 1 || len(res.Perf) != 1 {
 		t.Fatalf("errorCount=%d perf=%d", res.Session.ErrorCount, len(res.Perf))
+	}
+}
+
+func TestOneCharacterHandle(t *testing.T) {
+	e := newTestEnv(t)
+	pid, key := e.setup()
+	base := "/api/projects/" + itoa(pid)
+	if code := e.do("PATCH", "/api/me", map[string]any{"handle": "a"}, nil); code != 200 {
+		t.Fatalf("1-character handle rejected: %d", code)
+	}
+	e.do("POST", "/api/users", map[string]any{"name": "Bob", "email": "bob@example.com", "password": "hunter2hunter2"}, nil)
+	e.ingest(key, map[string]any{"server": map[string]any{"jobId": "j"}, "items": []any{map[string]any{"type": "error", "message": "boom"}}})
+	var issues struct{ Issues []issueRow }
+	e.do("GET", base+"/issues", nil, &issues)
+
+	e.do("POST", "/api/auth/logout", map[string]any{}, nil)
+	e.do("POST", "/api/auth/login", map[string]any{"email": "bob@example.com", "password": "hunter2hunter2"}, nil)
+	e.do("POST", base+"/issues/"+itoa(issues.Issues[0].ID)+"/comments", map[string]any{"body": "@a this one's yours (mail me at bob@a too)"}, nil)
+
+	e.do("POST", "/api/auth/logout", map[string]any{}, nil)
+	e.do("POST", "/api/auth/login", map[string]any{"email": "admin@example.com", "password": "hunter2hunter2"}, nil)
+	var inbox struct {
+		Unread        int
+		Notifications []struct{ Kind string }
+	}
+	e.do("GET", "/api/notifications", nil, &inbox)
+	if inbox.Unread != 1 || inbox.Notifications[0].Kind != "mention" {
+		t.Fatalf("expected one mention for @a, got %+v", inbox)
 	}
 }
