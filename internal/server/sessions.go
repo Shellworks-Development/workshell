@@ -115,7 +115,7 @@ type timelineItem struct {
 // timeline merges everything recorded for one session (or, with an empty
 // session key, a player's activity in a time window) in chronological order.
 func (s *Server) timeline(ctx context.Context, p *project, sessionKey string, userID, from, to int64, limit int) ([]timelineItem, error) {
-	var items []timelineItem
+	items := []timelineItem{}
 	// Rows tagged with the session id, plus untagged rows from the same player
 	// in the session's time window. Two indexed queries rather than an OR.
 	args := []any{p.ID, sessionKey, userID, from, to}

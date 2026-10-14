@@ -373,3 +373,21 @@ func TestErrorFloodKeepsSamplesAndCounts(t *testing.T) {
 		t.Fatalf("server breakdown should cover all 60 events, got %d", servers)
 	}
 }
+
+// A player who has only joined has an empty timeline, which must be a JSON
+// list (the player page iterates it).
+func TestNewPlayerHasEmptyTimeline(t *testing.T) {
+	e := newTestEnv(t)
+	pid, key := e.setup()
+	e.ingest(key, map[string]any{"server": map[string]any{"jobId": "j"}, "items": []any{
+		map[string]any{"type": "session_start", "userId": 42, "sessionId": "s-42", "ts": time.Now().Add(-30 * 24 * time.Hour).UnixMilli()},
+	}})
+	e.s.db.W.Exec(`UPDATE players SET last_seen = ? WHERE user_id = 42`, time.Now().Add(-30*24*time.Hour).UnixMilli())
+	var raw map[string]json.RawMessage
+	if code := e.do("GET", "/api/projects/"+itoa(pid)+"/players/42", nil, &raw); code != 200 {
+		t.Fatalf("player: %d", code)
+	}
+	if string(raw["timeline"]) != "[]" {
+		t.Fatalf("timeline should be an empty list, got %s", raw["timeline"])
+	}
+}
