@@ -216,6 +216,8 @@ Found a vulnerability? Please report it privately; see [SECURITY.md](SECURITY.md
 | `WORKSHELL_MAX_INGEST_BYTES` | `8388608` | Maximum decompressed ingest request size |
 | `WORKSHELL_SESSION_DAYS` | `30` | Dashboard login lifetime |
 
+To connect GitHub (**Settings → Integrations**), use a fine-grained personal access token limited to your game's repository with **Issues: Read and write** (GitHub adds **Metadata: Read-only** automatically). Workshell needs no other permission.
+
 Retention is set per project. By default logs, traces and health data are kept for 14 days, and errors, events, sessions and detections for 90 days. Whiteboard snapshots are kept until you delete them.
 
 ### Capacity

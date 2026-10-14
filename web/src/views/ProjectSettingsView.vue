@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Download, Eye, EyeOff, KeyRound, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { Download, ExternalLink, Eye, EyeOff, KeyRound, RefreshCw, Trash2 } from 'lucide-vue-next'
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Badge from '@/components/Badge.vue'
@@ -104,6 +104,23 @@ async function toggleHashing() {
   }
   await save({ hashUserIds: enabling }, enabling ? 'Player ids will be hashed' : 'Player ids will be stored as-is')
 }
+
+// GitHub pre-fills a fine-grained token form from these parameters: owned by the
+// repository's owner, with Issues read & write (Metadata read is always added).
+const githubTokenUrl = computed(() => {
+  const repo = form.githubRepo.trim()
+  const [owner = '', name = ''] = repo.split('/')
+  // GitHub token names are at most 40 characters.
+  const label = name && `Workshell (${name})`.length <= 40 ? `Workshell (${name})` : 'Workshell'
+  const q = new URLSearchParams({
+    name: label,
+    description: 'Lets Workshell open GitHub issues and comment on them.',
+    expires_in: '90',
+    issues: 'write',
+  })
+  if (owner && name) q.set('target_name', owner)
+  return `https://github.com/settings/personal-access-tokens/new?${q}`
+})
 
 const robloxSecret = ref('')
 const robloxUrl = computed(() => `${baseUrl.value}/api/v1/roblox/${pid.value}/webhook`)
@@ -428,7 +445,19 @@ end })                                                        -- rate limit + va
             <div class="max-w-md">
               <label class="label" for="token">Access token</label>
               <input id="token" v-model="form.githubToken" type="password" class="input mono" :placeholder="project?.hasGithubToken ? '•••••••• (saved — leave blank to keep)' : 'github_pat_…'" autocomplete="off" />
-              <p class="hint">A fine-grained token with Issues read & write on this repository. Stored encrypted.</p>
+              <p class="hint">
+                A fine-grained token with access to <span class="font-medium">only this repository</span> and two permissions:
+                <span class="font-medium">Issues: Read and write</span> and <span class="font-medium">Metadata: Read-only</span> (GitHub adds this one
+                automatically). Nothing else is needed. Stored encrypted.
+              </p>
+              <a :href="githubTokenUrl" target="_blank" rel="noopener noreferrer" class="btn btn-sm mt-2">
+                <ExternalLink class="size-3.5" /> Create a token on GitHub
+              </a>
+              <p class="hint">
+                The link pre-fills the permissions. On GitHub, under <span class="font-medium">Repository access</span>, choose
+                <span class="font-medium">Only select repositories</span> and pick {{ form.githubRepo || 'your repository' }}. Organization repositories
+                may need an owner to approve the token.
+              </p>
             </div>
           </div>
           <div class="flex justify-between rounded-b-xl border-t border-border bg-surface-2/50 px-5 py-3">
