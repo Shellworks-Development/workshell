@@ -57,6 +57,18 @@ const total = computed(() => {
   return list.length ? Math.max(...list.map((s) => s.start + s.durationMs)) - Math.min(...list.map((s) => s.start)) : 0
 })
 
+type Row = { left: number; width: number }
+function labelPos(r: Row): 'inside' | 'before' | 'after' {
+  if (r.width >= 18) return 'inside'
+  return r.left + r.width > 78 ? 'before' : 'after'
+}
+function labelStyle(r: Row) {
+  const pos = labelPos(r)
+  if (pos === 'inside') return { right: `calc(${100 - r.left - r.width}% + 6px)` }
+  if (pos === 'before') return { right: `calc(${100 - r.left}% + 6px)` }
+  return { left: `calc(${r.left + r.width}% + 6px)` }
+}
+
 function send() {
   if (!spans.value?.length || !props.traceId) return
   const items = traceItems(props.traceId, spans.value, here())
@@ -80,11 +92,12 @@ function send() {
             :class="r.s.status === 'error' ? 'bg-danger/70' : 'bg-accent/70'"
             :style="{ left: `${r.left}%`, width: `max(2px, ${r.width}%)` }"
           />
-          <!-- Long bars carry their label inside; short ones put it just after. -->
+          <!-- Wide bars carry their label inside; narrow bars near the end put it
+               before the bar; the rest put it just after. -->
           <span
             class="tabular absolute inset-y-0 flex items-center text-[11px] whitespace-nowrap"
-            :class="r.left + r.width > 70 ? 'font-medium text-fg' : 'text-muted'"
-            :style="r.left + r.width > 70 ? { right: `calc(${100 - r.left - r.width}% + 6px)` } : { left: `calc(${r.left + r.width}% + 6px)` }"
+            :class="labelPos(r) === 'inside' ? 'font-medium text-fg' : 'text-muted'"
+            :style="labelStyle(r)"
           >
             {{ spanMs(r.s.durationMs) }}
           </span>
