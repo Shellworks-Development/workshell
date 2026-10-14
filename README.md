@@ -85,6 +85,15 @@ The dashboard is an installable PWA that works on phones. It comes in light and 
 
 ## Quick start
 
+**Prebuilt binary** (Linux and macOS; Windows builds are on the [releases page](https://github.com/Shellworks-Development/workshell/releases))
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Shellworks-Development/workshell/master/install.sh | sh
+workshell         # serves on :8080 and stores data in ./data
+```
+
+The script downloads the latest release for your platform, checks it against the release's `SHA256SUMS`, and installs it to `/usr/local/bin` or `~/.local/bin`. The same binary is the server and the `workshell release` CLI.
+
 **Docker**
 
 ```sh
@@ -109,7 +118,7 @@ Want to look around first? `make sim KEY=wsk_...` sends about a week of simulate
 
 ## Install the SDK
 
-1. Download `Workshell.rbxmx` from your project's **Settings → SDK setup** and put it in **ReplicatedStorage**, or sync `sdk/` with Rojo or Wally.
+1. Download `Workshell.rbxmx` from your project's **Settings → SDK setup** (or `Workshell.rbxm` from the [latest release](https://github.com/Shellworks-Development/workshell/releases/latest)) and put it in **ReplicatedStorage**, or sync `sdk/` with Rojo or Wally.
 2. Turn on **Game Settings → Security → Allow HTTP Requests**.
 3. Start it from a server Script:
 
@@ -172,7 +181,7 @@ Clients can call `track`, `captureError`, `try` and `addBreadcrumb`. Client data
 
 ## Releases and Rojo
 
-Run `workshell release` in CI before `rojo build`:
+Install the binary in CI (the install script above works on Linux and macOS runners), then run `workshell release` before `rojo build`:
 
 ```sh
 WORKSHELL_URL=https://workshell.example.com WORKSHELL_KEY=wsk_... \

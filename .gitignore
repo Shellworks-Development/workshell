@@ -19,3 +19,4 @@ data/
 # SDK build output
 *.rbxm
 *.rbxmx
+/dist/
