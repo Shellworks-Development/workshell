@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/overview.webp" alt="Workshell project overview: live players, errors, exploit detections and top issues">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.webp"><img src="docs/screenshots/overview-light.webp" alt="Workshell project overview: live players, errors, exploit detections and top issues"></picture>
 </p>
 
 ## Why Workshell
@@ -63,7 +63,7 @@ Lay out an investigation on a shared canvas. Combine sticky notes and arrows wit
 </table>
 
 <p align="center">
-  <img src="docs/screenshots/whiteboard.webp" alt="A whiteboard combining a frame-rate chart, an issue, sticky notes and a trace drawn as a node graph">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/whiteboard-dark.webp"><img src="docs/screenshots/whiteboard-light.webp" alt="A whiteboard combining a frame-rate chart, an issue, sticky notes and a trace drawn as a node graph"></picture>
   <br><sub>A whiteboard: a chart with a pinned note, the regressed issue, theories on stickies, and a slow <code>player.join</code> trace drawn as a node graph with span durations.</sub>
 </p>
 
@@ -73,9 +73,9 @@ Lay out an investigation on a shared canvas. Combine sticky notes and arrows wit
 
 | Issue | Session |
 | --- | --- |
-| ![Issue with a stack trace resolved to source files](docs/screenshots/issue.webp) | ![Session timeline with client FPS, ping and memory](docs/screenshots/session.webp) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/issue-dark.webp"><img src="docs/screenshots/issue-light.webp" alt="Issue with a stack trace resolved to source files"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/session-dark.webp"><img src="docs/screenshots/session-light.webp" alt="Session timeline with client FPS, ping and memory"></picture> |
 
-<p align="center"><img src="docs/screenshots/mobile.webp" width="760" alt="Workshell on a phone: overview, issue and logs"></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mobile-dark.webp"><img src="docs/screenshots/mobile-light.webp" alt="Workshell on a phone: overview, issue and logs" width="760"></picture></p>
 
 The dashboard is an installable PWA that works on phones. It comes in light and dark themes, plus Catppuccin, Rosé Pine, Nord and Gruvbox.
 
@@ -197,13 +197,22 @@ Exploiters can reach Workshell only through your game's clients, and they will t
 | `WORKSHELL_DATA_DIR` | `./data` | SQLite database and generated secret key. **Back this up.** |
 | `WORKSHELL_PUBLIC_URL` | | Public URL, used in setup snippets and alert links |
 | `WORKSHELL_SECRET_KEY` | generated | 32-byte hex or base64 key that encrypts stored secrets |
-| `WORKSHELL_REDIS_URL` | | e.g. `redis://localhost:6379/0`: a durable ingest queue and live streaming across instances |
+| `WORKSHELL_REDIS_URL` | | e.g. `redis://localhost:6379/0`: a durable ingest queue that survives restarts, and live updates shared between instances. The database is still one SQLite file. |
 | `WORKSHELL_SECURE_COOKIES` | `false` | Set to `true` when served over HTTPS |
 | `WORKSHELL_TRUST_PROXY` | `false` | Trust `X-Forwarded-*` headers from a reverse proxy |
 | `WORKSHELL_MAX_INGEST_BYTES` | `8388608` | Maximum decompressed ingest request size |
 | `WORKSHELL_SESSION_DAYS` | `30` | Dashboard login lifetime |
 
 Retention is set per project. By default logs, traces and health data are kept for 14 days, and errors, events, sessions and detections for 90 days. Whiteboard snapshots are kept until you delete them.
+
+### Capacity
+
+Workshell stores everything in one SQLite database with a single writer. Redis makes the ingest queue durable; it does not make the database scale horizontally. Measured on one machine (an 8-core Ryzen 7 5700X), with 100 simulated game servers sending 1.1 million items over 9 minutes while six dashboard pages were polled throughout:
+
+- Ingest kept up the whole time; everything was written within 2 seconds of the last send, and nothing errored.
+- Issues, logs and sessions answered in about 11 ms or less (p95). The overview answered in about 230 ms, server health in about 360 ms, and the performance page, which scans a day of traces, in about 760 ms (all p95).
+
+Expect the analytics-style pages (performance, server health) to slow down as a project's history grows into tens of millions of rows. Load-test with your own traffic before relying on it for a large game.
 
 ## Development
 
