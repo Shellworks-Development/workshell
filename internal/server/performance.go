@@ -16,6 +16,9 @@ func percentile(sorted []float64, p float64) float64 {
 
 const maxSpanSample = 200_000
 
+// maxSpanScan bounds the overview's single pass over a range's spans.
+const maxSpanScan = 2_000_000
+
 // handlePerformance summarizes traced operations (spans) and client
 // performance for a time range.
 func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request, p *project) error {
@@ -32,32 +35,62 @@ func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request, p *pr
 		P99       float64 `json:"p99"`
 		PerMinute float64 `json:"perMinute"`
 	}
-	rows, err := s.db.R.QueryContext(ctx, `
-		SELECT name, COUNT(*), SUM(status = 'error'), AVG(duration_ms) FROM spans
-		WHERE project_id = ? AND ts >= ? AND ts < ? GROUP BY name ORDER BY COUNT(*) DESC LIMIT 100`, p.ID, tr.From, tr.To)
+	// One pass over the range's spans gives counts, errors, averages and
+	// percentiles for every operation (instead of an aggregate plus a query per
+	// name), and one pass over client samples gives both the per-platform table
+	// and the time series.
+	type agg struct {
+		d      []float64
+		errors int64
+		sum    float64
+	}
+	byName := map[string]*agg{}
+	rows, err := s.db.R.QueryContext(ctx, `SELECT name, duration_ms, status FROM spans WHERE project_id = ? AND ts >= ? AND ts < ? LIMIT ?`,
+		p.ID, tr.From, tr.To, maxSpanScan)
 	if err != nil {
 		return err
 	}
-	txns := []*txn{}
 	for rows.Next() {
-		x := &txn{}
-		if err := rows.Scan(&x.Name, &x.Count, &x.Errors, &x.AvgMs); err != nil {
+		var name, status string
+		var d float64
+		if err := rows.Scan(&name, &d, &status); err != nil {
 			rows.Close()
 			return err
 		}
-		x.PerMinute = float64(x.Count) / (float64(tr.To-tr.From) / 60_000)
-		txns = append(txns, x)
+		a := byName[name]
+		if a == nil {
+			a = &agg{}
+			byName[name] = a
+		}
+		a.d = append(a.d, d)
+		a.sum += d
+		if status == "error" {
+			a.errors++
+		}
 	}
 	rows.Close()
-	for _, x := range txns {
-		d, err := s.spanDurations(r, p.ID, x.Name, tr.From, tr.To)
-		if err != nil {
-			return err
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	txns := []*txn{}
+	minutes := float64(tr.To-tr.From) / 60_000
+	for name, a := range byName {
+		sort.Float64s(a.d)
+		n := float64(len(a.d))
+		txns = append(txns, &txn{Name: name, Count: int64(len(a.d)), Errors: a.errors, AvgMs: a.sum / n, PerMinute: n / minutes,
+			P50: percentile(a.d, 0.5), P95: percentile(a.d, 0.95), P99: percentile(a.d, 0.99)})
+	}
+	sort.Slice(txns, func(i, j int) bool {
+		if txns[i].Count != txns[j].Count {
+			return txns[i].Count > txns[j].Count
 		}
-		x.P50, x.P95, x.P99 = percentile(d, 0.5), percentile(d, 0.95), percentile(d, 0.99)
+		return txns[i].Name < txns[j].Name
+	})
+	if len(txns) > 100 {
+		txns = txns[:100]
 	}
 
-	// Client performance by platform.
+	// Client performance by platform, and over time.
 	type platformPerf struct {
 		Platform string  `json:"platform"`
 		Samples  int64   `json:"samples"`
@@ -66,67 +99,69 @@ func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request, p *pr
 		MemoryMb float64 `json:"memoryMb"`
 		LowFPS   float64 `json:"lowFpsShare"` // share of samples under 30 FPS
 	}
-	platforms := []platformPerf{}
-	rows, err = s.db.R.QueryContext(ctx, `
-		SELECT CASE WHEN platform = '' THEN 'Unknown' ELSE platform END, COUNT(*), AVG(fps), AVG(ping_ms), AVG(memory_mb), AVG(fps < 30)
-		FROM client_perf WHERE project_id = ? AND ts >= ? AND ts < ? GROUP BY 1 ORDER BY 2 DESC`, p.ID, tr.From, tr.To)
+	type sums struct{ n, fps, ping, mem, low float64 }
+	plat := map[string]*sums{}
+	buckets := map[int64]*sums{}
+	rows, err = s.db.R.QueryContext(ctx, `SELECT ts, platform, fps, ping_ms, memory_mb FROM client_perf WHERE project_id = ? AND ts >= ? AND ts < ?`,
+		p.ID, tr.From, tr.To)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
-		var x platformPerf
-		if err := rows.Scan(&x.Platform, &x.Samples, &x.FPS, &x.PingMs, &x.MemoryMb, &x.LowFPS); err != nil {
-			rows.Close()
-			return err
-		}
-		platforms = append(platforms, x)
-	}
-	rows.Close()
-
-	client := newTimeseries(tr, "fps", "pingMs", "memoryMb")
-	rows, err = s.db.R.QueryContext(ctx, `
-		SELECT (ts - ?2) / ?4 * ?4 + ?2, AVG(fps), AVG(ping_ms), AVG(memory_mb) FROM client_perf
-		WHERE project_id = ?1 AND ts >= ?2 AND ts < ?3 GROUP BY 1`, p.ID, tr.From, tr.To, tr.Bucket)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var b int64
+		var ts int64
+		var platform string
 		var fps, ping, mem float64
-		if err := rows.Scan(&b, &fps, &ping, &mem); err != nil {
+		if err := rows.Scan(&ts, &platform, &fps, &ping, &mem); err != nil {
 			rows.Close()
 			return err
 		}
-		client.set(0, b, fps)
-		client.set(1, b, ping)
-		client.set(2, b, mem)
+		if platform == "" {
+			platform = "Unknown"
+		}
+		low := 0.0
+		if fps < 30 {
+			low = 1
+		}
+		ps := plat[platform]
+		if ps == nil {
+			ps = &sums{}
+			plat[platform] = ps
+		}
+		b := (ts-tr.From)/tr.Bucket*tr.Bucket + tr.From
+		bs := buckets[b]
+		if bs == nil {
+			bs = &sums{}
+			buckets[b] = bs
+		}
+		for _, x := range []*sums{ps, bs} {
+			x.n++
+			x.fps += fps
+			x.ping += ping
+			x.mem += mem
+			x.low += low
+		}
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	platforms := []platformPerf{}
+	for name, x := range plat {
+		platforms = append(platforms, platformPerf{Platform: name, Samples: int64(x.n), FPS: x.fps / x.n, PingMs: x.ping / x.n, MemoryMb: x.mem / x.n, LowFPS: x.low / x.n})
+	}
+	sort.Slice(platforms, func(i, j int) bool { return platforms[i].Samples > platforms[j].Samples })
+	client := newTimeseries(tr, "fps", "pingMs", "memoryMb")
+	for b, x := range buckets {
+		client.set(0, b, x.fps/x.n)
+		client.set(1, b, x.ping/x.n)
+		client.set(2, b, x.mem/x.n)
+	}
 
 	server, err := s.serverSeries(ctx, p.ID, tr, "")
 	if err != nil {
 		return err
 	}
 	return ok(w, map[string]any{"transactions": txns, "platforms": platforms, "client": client, "server": server})
-}
-
-func (s *Server) spanDurations(r *http.Request, pid int64, name string, from, to int64) ([]float64, error) {
-	rows, err := s.db.R.QueryContext(r.Context(), `SELECT duration_ms FROM spans WHERE project_id = ? AND name = ? AND ts >= ? AND ts < ? LIMIT ?`,
-		pid, name, from, to, maxSpanSample)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var d []float64
-	for rows.Next() {
-		var v float64
-		if err := rows.Scan(&v); err != nil {
-			return nil, err
-		}
-		d = append(d, v)
-	}
-	sort.Float64s(d)
-	return d, rows.Err()
 }
 
 func (s *Server) handleSpanDetail(w http.ResponseWriter, r *http.Request, p *project) error {
