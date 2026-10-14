@@ -17,16 +17,17 @@ import (
 )
 
 type Server struct {
-	cfg    config.Config
-	db     *db.DB
-	log    *slog.Logger
-	web    fs.FS
-	sdk    fs.FS
-	box    *secure.Box
-	queue  pipeline.Queue
-	broker pipeline.Broker
-	alerts *alerter
-	limits *limiters
+	cfg     config.Config
+	db      *db.DB
+	log     *slog.Logger
+	web     fs.FS
+	sdk     fs.FS
+	box     *secure.Box
+	queue   pipeline.Queue
+	broker  pipeline.Broker
+	alerts  *alerter
+	limits  *limiters
+	replays *replayCache
 }
 
 type Options struct {
@@ -42,15 +43,16 @@ type Options struct {
 
 func New(o Options) *Server {
 	s := &Server{
-		cfg:    o.Config,
-		db:     o.DB,
-		log:    o.Log,
-		web:    o.Web,
-		sdk:    o.SDK,
-		box:    o.Box,
-		queue:  o.Queue,
-		broker: o.Broker,
-		limits: newLimiters(),
+		cfg:     o.Config,
+		db:      o.DB,
+		log:     o.Log,
+		web:     o.Web,
+		sdk:     o.SDK,
+		box:     o.Box,
+		queue:   o.Queue,
+		broker:  o.Broker,
+		limits:  newLimiters(),
+		replays: newReplayCache(),
 	}
 	s.alerts = newAlerter(s)
 	return s
@@ -60,7 +62,7 @@ func New(o Options) *Server {
 // delivery and evaluation, and retention.
 func (s *Server) Run(ctx context.Context) {
 	s.migrateLegacyWebhooks(ctx)
-	go s.queue.Consume(ctx, func(jobs [][]byte) { s.processJobs(context.WithoutCancel(ctx), jobs) })
+	go s.queue.Consume(ctx, func(jobs [][]byte) []error { return s.processJobs(context.WithoutCancel(ctx), jobs) })
 	go s.alerts.run(ctx)
 	go s.maintenanceLoop(ctx)
 }
@@ -84,6 +86,7 @@ func (s *Server) Handler() http.Handler {
 
 	// SDK and CI endpoints (authenticated by project ingest key).
 	h("POST /api/v1/ingest", s.handleIngest)
+	h("POST /api/v1/roblox/{pid}/webhook", s.handleRobloxWebhook)
 	h("POST /api/v1/releases", s.handleCreateRelease)
 	h("GET /api/sdk/Workshell.rbxmx", s.handleSDKModel)
 
@@ -136,6 +139,8 @@ func (s *Server) Handler() http.Handler {
 	proj("GET /api/projects/{pid}/sessions/{sid}", s.handleGetSession)
 	proj("GET /api/projects/{pid}/players", s.handleListPlayers)
 	proj("GET /api/projects/{pid}/players/{userId}", s.handleGetPlayer)
+	projectUser("DELETE /api/projects/{pid}/players/{userId}", s.handleErasePlayer)
+	projectUser("POST /api/projects/{pid}/roblox-webhook-secret", s.handleRotateRobloxSecret)
 
 	// Servers and performance.
 	proj("GET /api/projects/{pid}/servers", s.handleListServers)
@@ -268,6 +273,7 @@ func (s *Server) maintenanceLoop(ctx context.Context) {
 			s.closeStaleServers(ctx)
 			s.evaluateAlertRules(ctx)
 			s.limits.sweep()
+			s.replays.sweep()
 		case <-hour.C:
 			s.runRetention(ctx)
 		}

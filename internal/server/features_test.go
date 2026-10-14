@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"encoding/binary"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -41,8 +43,56 @@ func TestSignedIngest(t *testing.T) {
 	if code := e.ingestWith(key, env, sign(p.SigningSecret, -10*time.Minute)); code != http.StatusUnauthorized {
 		t.Fatalf("stale timestamp should be rejected, got %d", code)
 	}
-	if code := e.ingestWith(key, env, sign(p.SigningSecret, 0)); code != http.StatusAccepted {
+	valid := sign(p.SigningSecret, 0)
+	body, _ := json.Marshal(env)
+	headers := valid(body)
+	fixed := func([]byte) map[string]string { return headers }
+	if code := e.ingestWith(key, env, fixed); code != http.StatusAccepted {
 		t.Fatalf("valid signature rejected: %d", code)
+	}
+	// The same signed request again inside the window is a replay.
+	if code := e.ingestWith(key, env, fixed); code != http.StatusConflict {
+		t.Fatalf("replayed request should be rejected, got %d", code)
+	}
+}
+
+// "Require signed requests" with no secret must fail closed, not accept any
+// signature header (it used to skip verification entirely).
+func TestRequireSignatureWithoutSecretFailsClosed(t *testing.T) {
+	e := newTestEnv(t)
+	pid, key := e.setup()
+	e.do("PATCH", "/api/projects/"+itoa(pid), map[string]any{"requireSignature": true}, nil)
+	// The API refuses this combination; set it directly to test the defense in depth.
+	e.s.db.W.Exec(`UPDATE projects SET signing_secret = '', require_signature = 1 WHERE id = ?`, pid)
+	e.s.invalidateKeyCache()
+	env := map[string]any{"server": map[string]any{"jobId": "j"}, "items": []any{map[string]any{"type": "log", "message": "hi"}}}
+	forged := func([]byte) map[string]string {
+		return map[string]string{"X-Workshell-Timestamp": strconv.FormatInt(time.Now().Unix(), 10), "X-Workshell-Signature": "v1=deadbeef"}
+	}
+	if code := e.ingestWith(key, env, forged); code != http.StatusUnauthorized {
+		t.Fatalf("forged signature accepted with no secret configured: %d", code)
+	}
+}
+
+// A batch delivered twice (written, then redelivered before it was
+// acknowledged) is stored once.
+func TestRedeliveredBatchIsIngestedOnce(t *testing.T) {
+	e := newTestEnv(t)
+	pid, _ := e.setup()
+	body := []byte(`{"server":{"jobId":"j"},"items":[{"type":"log","message":"exactly once"}]}`)
+	job := make([]byte, 16+len(body))
+	binary.BigEndian.PutUint64(job, uint64(pid))
+	binary.BigEndian.PutUint64(job[8:], uint64(time.Now().UnixMilli()))
+	copy(job[16:], body)
+	for i := 0; i < 2; i++ {
+		if errs := e.s.processJobs(context.Background(), [][]byte{job}); errs[0] != nil {
+			t.Fatalf("delivery %d failed: %v", i+1, errs[0])
+		}
+	}
+	var n int
+	e.s.db.R.QueryRow(`SELECT COUNT(*) FROM logs WHERE project_id = ? AND message = 'exactly once'`, pid).Scan(&n)
+	if n != 1 {
+		t.Fatalf("expected the log once, got %d", n)
 	}
 }
 
@@ -266,5 +316,60 @@ func TestOneCharacterHandle(t *testing.T) {
 	e.do("GET", "/api/notifications", nil, &inbox)
 	if inbox.Unread != 1 || inbox.Notifications[0].Kind != "mention" {
 		t.Fatalf("expected one mention for @a, got %+v", inbox)
+	}
+}
+
+// A crash loop across a fleet keeps issueSamples full events and counts the
+// rest, so totals, charts and breakdowns still add up.
+func TestErrorFloodKeepsSamplesAndCounts(t *testing.T) {
+	e := newTestEnv(t)
+	pid, key := e.setup()
+	base := "/api/projects/" + itoa(pid)
+	now := time.Now().UnixMilli()
+	for b := 0; b < 3; b++ {
+		items := []any{}
+		for i := 0; i < 20; i++ {
+			items = append(items, map[string]any{"type": "error", "message": "attempt to index nil with 'Price'",
+				"stack": "ReplicatedStorage.Shop:210", "ts": now + int64(b*20+i)})
+		}
+		env := map[string]any{"server": map[string]any{"jobId": "job-" + itoa(int64(b)), "placeVersion": 42}, "items": items}
+		if code := e.ingest(key, env); code != http.StatusAccepted {
+			t.Fatalf("ingest: %d", code)
+		}
+	}
+	e.settle()
+
+	var list struct {
+		Issues []struct {
+			ID         int64 `json:"id"`
+			EventCount int64 `json:"eventCount"`
+		} `json:"issues"`
+	}
+	e.do("GET", base+"/issues", nil, &list)
+	issues := list.Issues
+	if len(issues) != 1 || issues[0].EventCount != 60 {
+		t.Fatalf("expected one issue with 60 events, got %+v", issues)
+	}
+	var stored, tallied int64
+	e.s.db.R.QueryRow(`SELECT COUNT(*) FROM error_events WHERE issue_id = ? AND sampled = 1`, issues[0].ID).Scan(&stored)
+	e.s.db.R.QueryRow(`SELECT COALESCE(SUM(count), 0) FROM error_events WHERE issue_id = ? AND sampled = 0`, issues[0].ID).Scan(&tallied)
+	if stored != issueSamples || tallied != 60-issueSamples {
+		t.Fatalf("expected %d samples and %d tallied, got %d and %d", issueSamples, 60-issueSamples, stored, tallied)
+	}
+	var events []errorEvent
+	e.do("GET", base+"/issues/"+itoa(issues[0].ID)+"/events?limit=100", nil, &events)
+	if len(events) != issueSamples || events[0].Stack == "" {
+		t.Fatalf("events browser should list only the %d samples, got %d", issueSamples, len(events))
+	}
+	var detail struct {
+		Breakdown map[string][]tagCount `json:"breakdown"`
+	}
+	e.do("GET", base+"/issues/"+itoa(issues[0].ID), nil, &detail)
+	var servers int64
+	for _, t := range detail.Breakdown["server"] {
+		servers += t.Count
+	}
+	if servers != 60 {
+		t.Fatalf("server breakdown should cover all 60 events, got %d", servers)
 	}
 }

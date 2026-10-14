@@ -52,6 +52,7 @@ interface IssueDetail {
   histogram: Timeseries
   breakdown: Record<string, { value: string; count: number }[]>
   latest: ErrorEvent | null
+  samples: number
   firstRelease: Release | null
 }
 
@@ -371,7 +372,7 @@ const levelTone = (l?: string) => (l === 'error' ? 'danger' : l === 'warn' ? 'wa
               <h3 class="mb-2 text-[13px] font-medium">Breadcrumbs</h3>
               <div class="overflow-hidden rounded-lg border border-border">
                 <div v-for="(b, i) in [...event.breadcrumbs].reverse()" :key="i" class="flex items-baseline gap-3 border-b border-border px-3 py-1.5 text-[13px] last:border-0">
-                  <span class="mono w-16 shrink-0 text-faint">{{ time(b.ts) }}</span>
+                  <span class="mono shrink-0 whitespace-nowrap text-faint">{{ time(b.ts) }}</span>
                   <Badge :tone="levelTone(b.level)" class="w-16 shrink-0 justify-center">{{ b.category }}</Badge>
                   <span class="mono min-w-0 flex-1 break-all">{{ b.message }}</span>
                 </div>
@@ -406,6 +407,9 @@ const levelTone = (l?: string) => (l === 'error' ? 'danger' : l === 'warn' ? 'wa
                 <KeyValues :data="event.context" />
               </section>
             </div>
+            <p v-if="data && data.samples < issue.eventCount" class="border-t border-border pt-4 text-[13px] text-muted">
+              Full details are kept for {{ num(data.samples) }} of {{ num(issue.eventCount) }} events, up to 20 per release. The rest are counted in the totals and charts.
+            </p>
           </div>
         </div>
 

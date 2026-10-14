@@ -366,13 +366,18 @@ func (s *Server) handleGetIssue(w http.ResponseWriter, r *http.Request, p *proje
 		breakdown[name] = list
 	}
 
-	latest, err := s.queryErrorEvents(r, p, `WHERE issue_id = ? ORDER BY ts DESC, id DESC LIMIT 1`, issue.ID)
+	latest, err := s.queryErrorEvents(r, p, `WHERE issue_id = ? AND sampled = 1 ORDER BY ts DESC, id DESC LIMIT 1`, issue.ID)
 	if err != nil {
 		return err
 	}
 	var latestEvent *errorEvent
 	if len(latest) > 0 {
 		latestEvent = &latest[0]
+	}
+
+	var samples int64
+	if err := s.db.R.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM error_events WHERE issue_id = ? AND sampled = 1`, issue.ID).Scan(&samples); err != nil {
+		return err
 	}
 
 	var firstRelease *releaseRow
@@ -384,6 +389,7 @@ func (s *Server) handleGetIssue(w http.ResponseWriter, r *http.Request, p *proje
 		"histogram":    hist,
 		"breakdown":    breakdown,
 		"latest":       latestEvent,
+		"samples":      samples,
 		"firstRelease": firstRelease,
 	})
 }
@@ -395,7 +401,7 @@ func (s *Server) handleIssueEvents(w http.ResponseWriter, r *http.Request, p *pr
 	}
 	before := queryInt(r, "before", 1<<62)
 	limit := min(max(queryInt(r, "limit", 25), 1), 100)
-	events, err := s.queryErrorEvents(r, p, `WHERE issue_id = ? AND id < ? ORDER BY id DESC LIMIT ?`, issue.ID, before, limit)
+	events, err := s.queryErrorEvents(r, p, `WHERE issue_id = ? AND sampled = 1 AND id < ? ORDER BY id DESC LIMIT ?`, issue.ID, before, limit)
 	if err != nil {
 		return err
 	}

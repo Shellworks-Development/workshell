@@ -428,4 +428,35 @@ CREATE TABLE chart_annotations (
 );
 CREATE INDEX chart_annotations_key ON chart_annotations(project_id, chart_key, ts);
 `,
+	// v4: ingest idempotency. A batch that was written but not acknowledged
+	// (a crash between commit and ack) is redelivered; its hash is skipped.
+	`
+CREATE TABLE ingested_batches (
+	hash        BLOB PRIMARY KEY,
+	received_at INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX ingested_batches_received ON ingested_batches(received_at);
+`,
+	// v5: sample caps. Each issue keeps a few full events (stack, breadcrumbs,
+	// context) per release; the rest fold into per-minute tally rows
+	// (sampled = 0) that carry only a count, so a crash loop across a big
+	// fleet costs a counter, not a copy of every stack trace.
+	`
+ALTER TABLE error_events ADD COLUMN sampled INTEGER NOT NULL DEFAULT 1;
+CREATE UNIQUE INDEX error_events_tally ON error_events(issue_id, ts, release, job_id) WHERE sampled = 0;
+CREATE INDEX error_events_samples ON error_events(issue_id, ts) WHERE sampled = 1;
+CREATE TABLE issue_samples (
+	issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+	release  TEXT NOT NULL,
+	n        INTEGER NOT NULL,
+	PRIMARY KEY (issue_id, release)
+) WITHOUT ROWID;
+INSERT INTO issue_samples (issue_id, release, n) SELECT issue_id, release, COUNT(*) FROM error_events GROUP BY 1, 2;
+`,
+	// v6: player erasure (Roblox right-to-erasure webhooks and the manual
+	// button) needs to find a player's issue links, and a webhook secret.
+	`
+ALTER TABLE projects ADD COLUMN roblox_webhook_secret TEXT NOT NULL DEFAULT '';
+CREATE INDEX issue_users_user ON issue_users(user_id);
+`,
 }

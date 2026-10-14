@@ -292,6 +292,11 @@ local function sendBatch(): boolean
 		state.enabled = false
 		state.queue = {}
 		return false
+	elseif status == 409 then
+		-- The server already has this exact signed batch (a resend); it's delivered.
+		dropFront(count)
+		state.failures = 0
+		return true
 	elseif status == 413 or status == 400 then
 		-- The server will never accept this batch; drop it.
 		warnOnce("rejected" .. status, "batch rejected: " .. tostring(response.Body))

@@ -8,8 +8,13 @@ import (
 
 // runRetention deletes telemetry older than each project's retention settings.
 // Issues themselves are kept (with their counters) until their last event ages
-// out; player records are kept forever so "new player" stays accurate.
+// out; a player record goes once the player hasn't played for the data
+// retention period (if they come back, they count as a new player).
 func (s *Server) runRetention(ctx context.Context) {
+	// Idempotency keys only need to outlive redelivery (minutes to hours).
+	if _, err := s.db.W.ExecContext(ctx, `DELETE FROM ingested_batches WHERE received_at < ?`, nowMs()-int64(48*time.Hour/time.Millisecond)); err != nil {
+		s.log.Error("retention: ingested batches", "err", err)
+	}
 	rows, err := s.db.R.QueryContext(ctx, `SELECT id, log_retention_days, data_retention_days FROM projects`)
 	if err != nil {
 		s.log.Error("retention: list projects", "err", err)
@@ -62,6 +67,17 @@ func (s *Server) runRetention(ctx context.Context) {
 				s.log.Error("retention", "project", p.id, "table", q.table, "err", err)
 			}
 		}
+		// players has no rowid for deleteInChunks; the rows are tiny.
+		if _, err := s.db.W.ExecContext(ctx, `DELETE FROM players WHERE project_id = ? AND last_seen < ?`, p.id, dataCutoff); err != nil {
+			s.log.Error("retention", "project", p.id, "table", "players", "err", err)
+		}
+	}
+	// Issues whose old samples aged out may store new ones again.
+	if _, err := s.db.W.ExecContext(ctx, `
+		UPDATE issue_samples SET n = (SELECT COUNT(*) FROM error_events e
+			WHERE e.issue_id = issue_samples.issue_id AND e.release = issue_samples.release AND e.sampled = 1)
+		WHERE n > 0`); err != nil {
+		s.log.Error("retention: issue samples", "err", err)
 	}
 	// Reclaim WAL space after big deletes.
 	s.db.W.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)

@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
@@ -169,8 +170,16 @@ func (s *Server) loadIngestProject(ctx context.Context, where string, arg any) (
 	if err != nil {
 		return nil, err
 	}
-	p.SigningSecret = s.box.MustOpen(signing)
-	p.HashKey = []byte(s.box.MustOpen(hashSecret))
+	// A secret that no longer decrypts means WORKSHELL_SECRET_KEY changed. Say
+	// so loudly: signed-only projects then reject everything (fail closed)
+	// until the secret is regenerated.
+	var err1, err2 error
+	p.SigningSecret, err1 = s.box.Open(signing)
+	hashKey, err2 := s.box.Open(hashSecret)
+	p.HashKey = []byte(hashKey)
+	if err := errors.Join(err1, err2); err != nil {
+		s.log.Error("cannot decrypt project secrets; was WORKSHELL_SECRET_KEY changed? Regenerate them in project settings", "project", p.ID, "err", err)
+	}
 	return &p, nil
 }
 
@@ -220,7 +229,7 @@ func (s *Server) authenticateIngest(r *http.Request) (*ingestProject, []byte, er
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := verifySignature(r, p, body); err != nil {
+	if err := s.verifySignature(r, p, body); err != nil {
 		return nil, nil, err
 	}
 	return p, body, nil
@@ -228,29 +237,77 @@ func (s *Server) authenticateIngest(r *http.Request) (*ingestProject, []byte, er
 
 // verifySignature checks X-Workshell-Signature: v1=hex(HMAC-SHA256(secret,
 // timestamp + "." + body)), with X-Workshell-Timestamp within 5 minutes, so a
-// leaked ingest key alone can't be used to forge or replay data.
-func verifySignature(r *http.Request, p *ingestProject, body []byte) error {
+// leaked ingest key alone can't be used to forge or replay data. Each valid
+// signature is accepted once: a captured request can't be replayed inside the
+// window either.
+func (s *Server) verifySignature(r *http.Request, p *ingestProject, body []byte) error {
 	sig := r.Header.Get("X-Workshell-Signature")
+	if p.SigningSecret == "" {
+		if p.RequireSignature {
+			// Fail closed: "require signed requests" with no secret to check
+			// against must not quietly accept anything.
+			return errStatus(http.StatusUnauthorized, "this project requires signed requests but has no signing secret; generate one in Settings → Security")
+		}
+		return nil // signing isn't set up; a stray signature header proves nothing
+	}
 	if sig == "" {
 		if p.RequireSignature {
 			return errStatus(http.StatusUnauthorized, "this project requires signed requests")
 		}
 		return nil
 	}
-	if p.SigningSecret == "" {
-		return nil // signatures aren't configured; ignore
-	}
 	tsHeader := r.Header.Get("X-Workshell-Timestamp")
 	ts, err := strconv.ParseInt(tsHeader, 10, 64)
-	if err != nil || math.Abs(float64(time.Now().Unix()-ts)) > 300 {
+	if err != nil || math.Abs(float64(time.Now().Unix()-ts)) > signatureWindow.Seconds() {
 		return errStatus(http.StatusUnauthorized, "missing or stale X-Workshell-Timestamp")
 	}
 	want := secure.HMACHex([]byte(p.SigningSecret), append([]byte(tsHeader+"."), body...))
-	got := strings.TrimPrefix(sig, "v1=")
-	if !hmac.Equal([]byte(want), []byte(strings.ToLower(got))) {
+	got := strings.ToLower(strings.TrimPrefix(sig, "v1="))
+	if !hmac.Equal([]byte(want), []byte(got)) {
 		return errStatus(http.StatusUnauthorized, "invalid request signature")
 	}
+	if !s.replays.first(p.ID, want) {
+		return errStatus(http.StatusConflict, "this signed request was already received")
+	}
 	return nil
+}
+
+// signatureWindow is how far a signed request's timestamp may drift.
+const signatureWindow = 5 * time.Minute
+
+// replayCache remembers recently accepted signatures until their timestamp
+// window closes. It is per process: with several instances behind a load
+// balancer, a replay could still land once on each instance.
+type replayCache struct {
+	mu   sync.Mutex
+	seen map[string]time.Time
+}
+
+func newReplayCache() *replayCache { return &replayCache{seen: map[string]time.Time{}} }
+
+// first reports whether this signature is new, and records it.
+func (c *replayCache) first(projectID int64, sig string) bool {
+	key := strconv.FormatInt(projectID, 10) + ":" + sig
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if exp, ok := c.seen[key]; ok && now.Before(exp) {
+		return false
+	}
+	// Twice the window: a timestamp may be up to one window in the future.
+	c.seen[key] = now.Add(2 * signatureWindow)
+	return true
+}
+
+func (c *replayCache) sweep() {
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, exp := range c.seen {
+		if now.After(exp) {
+			delete(c.seen, k)
+		}
+	}
 }
 
 func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) error {
@@ -287,25 +344,36 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) error {
 }
 
 // processJobs is the queue consumer: it writes each batch to the database,
-// then publishes live updates and triggers alerts.
-func (s *Server) processJobs(ctx context.Context, jobs [][]byte) {
-	for _, job := range jobs {
+// then publishes live updates and triggers alerts. It reports, per job,
+// whether the write failed, so the queue keeps (and retries) failed batches
+// instead of losing accepted telemetry.
+func (s *Server) processJobs(ctx context.Context, jobs [][]byte) []error {
+	errs := make([]error, len(jobs))
+	for i, job := range jobs {
 		if len(job) < 16 {
-			continue
+			continue // malformed; nothing to retry
 		}
 		pid := int64(binary.BigEndian.Uint64(job))
 		received := int64(binary.BigEndian.Uint64(job[8:]))
 		p, err := s.projectByID(ctx, pid)
-		if err != nil || p == nil {
+		if err != nil {
+			errs[i] = err // database trouble; retry later
+			continue
+		}
+		if p == nil {
 			continue // project deleted after the batch was queued
 		}
 		var env envelope
 		if err := json.Unmarshal(job[16:], &env); err != nil {
-			continue
+			continue // can't ever succeed; drop it
 		}
-		res, err := s.ingest(ctx, p, &env, received)
+		res, err := s.ingest(ctx, p, &env, received, batchKey(pid, job[16:]))
+		if errors.Is(err, errDuplicateBatch) {
+			continue // already written by an earlier delivery
+		}
 		if err != nil {
-			s.log.Error("ingest batch failed", "project", pid, "err", err)
+			s.log.Error("ingest batch failed; will retry", "project", pid, "err", err)
+			errs[i] = err
 			continue
 		}
 		if len(res.live) > 0 {
@@ -317,6 +385,19 @@ func (s *Server) processJobs(ctx context.Context, jobs [][]byte) {
 			s.alerts.trigger(ctx, pid, t)
 		}
 	}
+	return errs
+}
+
+// errDuplicateBatch means the batch was already persisted.
+var errDuplicateBatch = errors.New("batch already ingested")
+
+// batchKey identifies a batch for idempotency: the project and the exact
+// request body, so redeliveries and SDK resends of the same body are written once.
+func batchKey(pid int64, body []byte) []byte {
+	h := sha256.New()
+	binary.Write(h, binary.BigEndian, pid)
+	h.Write(body)
+	return h.Sum(nil)
 }
 
 // decodeBody reads a request body, transparently un-gzipping it. Roblox's
@@ -437,7 +518,7 @@ type ingestResult struct {
 }
 
 // ingest writes one batch in a single transaction.
-func (s *Server) ingest(ctx context.Context, p *ingestProject, env *envelope, received int64) (*ingestResult, error) {
+func (s *Server) ingest(ctx context.Context, p *ingestProject, env *envelope, received int64, key []byte) (*ingestResult, error) {
 	now := nowMs()
 	jobID := truncate(strings.TrimSpace(env.Server.JobID), 64)
 	if jobID == "" {
@@ -453,6 +534,15 @@ func (s *Server) ingest(ctx context.Context, p *ingestProject, env *envelope, re
 
 	res := &ingestResult{}
 	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
+		if key != nil {
+			r, err := tx.ExecContext(ctx, `INSERT INTO ingested_batches (hash, received_at) VALUES (?, ?) ON CONFLICT DO NOTHING`, key, now)
+			if err != nil {
+				return err
+			}
+			if n, _ := r.RowsAffected(); n == 0 {
+				return errDuplicateBatch
+			}
+		}
 		// Every batch counts as proof of life for its server.
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO game_servers (project_id, job_id, place_id, place_version, release, environment, server_type, max_players, started_at, last_seen)
@@ -516,7 +606,7 @@ type batchWriter struct {
 	suspects     map[int64]bool
 }
 
-func (w *batchWriter) exec(query string, args ...any) (sql.Result, error) {
+func (w *batchWriter) stmt(query string) (*sql.Stmt, error) {
 	if w.stmts == nil {
 		w.stmts = map[string]*sql.Stmt{}
 	}
@@ -528,7 +618,23 @@ func (w *batchWriter) exec(query string, args ...any) (sql.Result, error) {
 		}
 		w.stmts[query] = st
 	}
+	return st, nil
+}
+
+func (w *batchWriter) exec(query string, args ...any) (sql.Result, error) {
+	st, err := w.stmt(query)
+	if err != nil {
+		return nil, err
+	}
 	return st.ExecContext(w.ctx, args...)
+}
+
+func (w *batchWriter) queryRow(query string, args []any, dest ...any) error {
+	st, err := w.stmt(query)
+	if err != nil {
+		return err
+	}
+	return st.QueryRowContext(w.ctx, args...).Scan(dest...)
 }
 
 func (w *batchWriter) close() {
@@ -767,6 +873,10 @@ func clamp(v, lo, hi float64) float64 {
 	return math.Max(lo, math.Min(hi, v))
 }
 
+// issueSamples is how many full events (stack, breadcrumbs, context) an issue
+// keeps per release before further events are only counted.
+const issueSamples = 20
+
 func (w *batchWriter) writeError(it *item) error {
 	side := oneOf(it.Side, "server", "client")
 	level := oneOf(it.Level, "error", "warning", "fatal")
@@ -836,6 +946,10 @@ func (w *batchWriter) writeError(it *item) error {
 				issueID, fmt.Sprintf(`{"release":%q}`, w.release), ts); err != nil {
 				return err
 			}
+			// A regression earns fresh samples: the old ones predate the fix.
+			if _, err := w.exec(`DELETE FROM issue_samples WHERE issue_id = ?`, issueID); err != nil {
+				return err
+			}
 			if assignee.Valid {
 				if _, err := w.exec(`INSERT INTO notifications (user_id, project_id, issue_id, kind, body, created_at) VALUES (?, ?, ?, 'regression', ?, ?)`,
 					assignee.Int64, w.p.ID, issueID, truncate(g.Title, 200), ts); err != nil {
@@ -862,6 +976,32 @@ func (w *batchWriter) writeError(it *item) error {
 			w.p.ID, it.SessionID, count); err != nil {
 			return err
 		}
+	}
+
+	// An issue keeps issueSamples full events per release. Past that, an event
+	// only bumps its server's tally for the minute: counts, charts and
+	// breakdowns stay exact, but a bad update that crashes every server
+	// doesn't store a million copies of the same stack trace.
+	var kept int64
+	if err := w.queryRow(`SELECT n FROM issue_samples WHERE issue_id = ? AND release = ?`, []any{issueID, w.release}, &kept); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if kept >= issueSamples {
+		var total int64
+		err := w.queryRow(`
+			INSERT INTO error_events (project_id, issue_id, ts, count, message, level, side, job_id, place_version, release, environment, sampled)
+			VALUES (?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, 0)
+			ON CONFLICT (issue_id, ts, release, job_id) WHERE sampled = 0 DO UPDATE SET count = count + excluded.count
+			RETURNING count`,
+			[]any{w.p.ID, issueID, ts - ts%60_000, count, level, side, w.jobID, w.placeVersion, w.release, w.environment}, &total)
+		// The live feed hears about a tally once per server per minute, not per event.
+		if err == nil && total == count {
+			w.live("error", map[string]any{"issueId": issueID, "title": g.Title, "culprit": g.Culprit, "side": side, "ts": ts, "userId": nullableUser(uid), "sessionKey": it.SessionID, "count": count})
+		}
+		return err
+	}
+	if _, err := w.exec(`INSERT INTO issue_samples (issue_id, release, n) VALUES (?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1`, issueID, w.release); err != nil {
+		return err
 	}
 
 	_, err = w.exec(`

@@ -106,6 +106,7 @@ export interface Project {
   signingSecret: string
   requireSignature: boolean
   hashUserIds: boolean
+  hasRobloxWebhook: boolean
   ingestRate: number
   clientRate: number
 }

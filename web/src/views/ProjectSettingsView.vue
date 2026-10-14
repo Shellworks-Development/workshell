@@ -105,6 +105,24 @@ async function toggleHashing() {
   await save({ hashUserIds: enabling }, enabling ? 'Player ids will be hashed' : 'Player ids will be stored as-is')
 }
 
+const robloxSecret = ref('')
+const robloxUrl = computed(() => `${baseUrl.value}/api/v1/roblox/${pid.value}/webhook`)
+async function rotateRobloxSecret() {
+  if (project.value?.hasRobloxWebhook) {
+    const ok = await confirmDialog({
+      title: 'Generate a new webhook secret?',
+      message: 'Roblox notifications signed with the old secret are refused until you paste the new one into Creator Hub.',
+      confirmLabel: 'Generate',
+      danger: true,
+    })
+    if (!ok) return
+  }
+  const res = await api.post<{ secret: string }>(`/projects/${pid.value}/roblox-webhook-secret`)
+  robloxSecret.value = res.secret
+  await reload()
+  toast('Webhook secret generated', 'Paste it into Creator Hub now. It isn’t shown again.')
+}
+
 async function remove() {
   const name = project.value?.name ?? ''
   const ok = await confirmDialog({
@@ -200,6 +218,10 @@ end })                                                        -- rate limit + va
                 <div class="flex items-center gap-2"><input id="dataret" v-model.number="form.dataRetentionDays" class="input w-24" type="number" min="1" max="3650" /><span class="text-[13px] text-muted">days</span></div>
               </div>
             </div>
+            <p class="hint max-w-xl">
+              Older data is deleted every hour. A player’s profile is removed once they haven’t played for the errors, events, sessions &amp; detections period; if they return, they count as a new
+              player. To delete one player now, use <span class="font-medium">Erase player data</span> on their page.
+            </p>
           </div>
           <div class="flex justify-end rounded-b-xl border-t border-border bg-surface-2/50 px-5 py-3"><button class="btn btn-primary" :disabled="saving">Save</button></div>
         </form>
@@ -325,6 +347,44 @@ end })                                                        -- rate limit + va
             </div>
             <button class="btn" @click="toggleHashing">{{ project?.hashUserIds ? 'Disable' : 'Enable' }}</button>
           </div>
+        </div>
+
+        <div class="card p-5">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 class="text-base font-semibold">Roblox data erasure</h2>
+              <p class="mt-1 max-w-xl text-[13px] text-muted">
+                When a player asks Roblox to delete their data, Roblox sends a right to erasure webhook. Workshell then deletes that player’s sessions, logs,
+                events, errors, traces, detections and whiteboard snapshots in this project. Erasures appear in the audit log, without the player’s id.
+              </p>
+            </div>
+            <Badge :tone="project?.hasRobloxWebhook ? 'success' : 'neutral'" dot>{{ project?.hasRobloxWebhook ? 'Connected' : 'Not set up' }}</Badge>
+          </div>
+          <ol class="mt-4 max-w-xl list-decimal space-y-3 pl-5 text-[13px]">
+            <li>
+              In Creator Hub, open <span class="font-medium">Webhooks</span> and add a webhook with this URL:
+              <div class="mt-2 flex items-center gap-2">
+                <input class="input mono min-w-0 flex-1" :value="robloxUrl" readonly aria-label="Webhook URL" />
+                <CopyButton :text="robloxUrl" />
+              </div>
+              <p v-if="isLocal" class="hint text-warning">Roblox can’t reach this address. Set WORKSHELL_PUBLIC_URL to a public HTTPS URL first.</p>
+            </li>
+            <li>
+              Generate a secret and paste it into the webhook’s secret field. Unsigned notifications are refused.
+              <div v-if="robloxSecret" class="mt-2 flex items-center gap-2">
+                <input class="input mono min-w-0 flex-1" :value="robloxSecret" readonly aria-label="Webhook secret" />
+                <CopyButton :text="robloxSecret" />
+              </div>
+              <div class="mt-2">
+                <button class="btn btn-sm" @click="rotateRobloxSecret">
+                  <component :is="project?.hasRobloxWebhook ? RefreshCw : KeyRound" class="size-3.5" />
+                  {{ project?.hasRobloxWebhook ? 'Rotate secret' : 'Generate secret' }}
+                </button>
+              </div>
+            </li>
+            <li>Select the <span class="font-medium">Right to erasure request</span> trigger, then use <span class="font-medium">Test response</span>. The test shows up in the audit log.</li>
+          </ol>
+          <p class="hint">This only clears Workshell. Your game’s own DataStores still need their own erasure.</p>
         </div>
 
         <form class="card" @submit.prevent="save({ ingestRate: form.ingestRate, clientRate: form.clientRate })">

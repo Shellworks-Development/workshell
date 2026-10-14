@@ -67,7 +67,7 @@ func (s *Server) handleCreateGitHubIssue(w http.ResponseWriter, r *http.Request,
 	fmt.Fprintf(&b, "**%s**\n\n", issue.Culprit)
 	fmt.Fprintf(&b, "| | |\n|---|---|\n| Events | %d |\n| Players affected | %d |\n| Side | %s |\n| First seen in | `%s` |\n| Last seen in | `%s` |\n\n",
 		issue.EventCount, issue.UserCount, issue.Side, issue.FirstRelease, issue.LastRelease)
-	latest, _ := s.queryErrorEvents(r, p, `WHERE issue_id = ? ORDER BY ts DESC, id DESC LIMIT 1`, issue.ID)
+	latest, _ := s.queryErrorEvents(r, p, `WHERE issue_id = ? AND sampled = 1 ORDER BY ts DESC, id DESC LIMIT 1`, issue.ID)
 	if len(latest) > 0 {
 		ev := latest[0]
 		fmt.Fprintf(&b, "### Message\n```\n%s\n```\n", strings.ReplaceAll(ev.Message, "```", "'''"))

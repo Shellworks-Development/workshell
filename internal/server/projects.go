@@ -29,19 +29,20 @@ type project struct {
 	HashUserIDs       bool   `json:"hashUserIds"`
 	IngestRate        int    `json:"ingestRate"`
 	ClientRate        int    `json:"clientRate"`
+	HasRobloxWebhook  bool   `json:"hasRobloxWebhook"`
 
 	githubToken string
 	hashSecret  string
 }
 
 const projectColumns = `id, name, ingest_key, created_at, log_retention_days, data_retention_days,
-	github_repo, github_token, signing_secret, require_signature, hash_user_ids, user_hash_secret, ingest_rate, client_rate`
+	github_repo, github_token, signing_secret, require_signature, hash_user_ids, user_hash_secret, ingest_rate, client_rate, roblox_webhook_secret != ''`
 
 func (s *Server) scanProject(row interface{ Scan(...any) error }) (*project, error) {
 	var p project
 	var token, signing, hash string
 	err := row.Scan(&p.ID, &p.Name, &p.IngestKey, &p.CreatedAt, &p.LogRetentionDays, &p.DataRetentionDays,
-		&p.GitHubRepo, &token, &signing, &p.RequireSignature, &p.HashUserIDs, &hash, &p.IngestRate, &p.ClientRate)
+		&p.GitHubRepo, &token, &signing, &p.RequireSignature, &p.HashUserIDs, &hash, &p.IngestRate, &p.ClientRate, &p.HasRobloxWebhook)
 	if err != nil {
 		return nil, err
 	}

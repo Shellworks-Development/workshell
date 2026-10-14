@@ -8,30 +8,52 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // ErrFull means the queue is at capacity; the SDK should retry later.
 var ErrFull = errors.New("ingest queue is full")
 
+// Handler persists a batch of jobs. It returns one error per job (or nil when
+// every job succeeded); a job is acknowledged only when its error is nil, and
+// failed jobs are delivered again until MaxAttempts.
+type Handler func(jobs [][]byte) []error
+
+// MaxAttempts bounds redelivery of a job that keeps failing, so one poison
+// batch can't block the queue forever.
+const MaxAttempts = 10
+
+func failed(errs []error, i int) error {
+	if i < len(errs) {
+		return errs[i]
+	}
+	return nil
+}
+
 // Queue buffers ingest jobs between the HTTP handler and the database writer.
 type Queue interface {
 	Enqueue(ctx context.Context, job []byte) error
-	// Consume calls handle with batches of jobs until ctx ends. A batch is
-	// acknowledged (removed) only after handle returns.
-	Consume(ctx context.Context, handle func(jobs [][]byte))
+	// Consume calls handle with batches of jobs until ctx ends. Jobs are
+	// removed only once handle reports them persisted.
+	Consume(ctx context.Context, handle Handler)
 	// Pending is the number of jobs not yet handled.
 	Pending() int64
 	Close() error
 }
 
-// MemQueue is a bounded in-process queue.
+// MemQueue is a bounded in-process queue. Failed jobs are retried in memory
+// with a short backoff; they are lost only if the process exits.
 type MemQueue struct {
 	ch      chan []byte
 	pending atomic.Int64
+	// RetryDelay is the wait before failed jobs are handled again.
+	RetryDelay time.Duration
+	// OnDrop is called when a job is given up on after MaxAttempts.
+	OnDrop func(job []byte, err error)
 }
 
 func NewMemQueue(capacity int) *MemQueue {
-	return &MemQueue{ch: make(chan []byte, capacity)}
+	return &MemQueue{ch: make(chan []byte, capacity), RetryDelay: time.Second}
 }
 
 func (q *MemQueue) Enqueue(ctx context.Context, job []byte) error {
@@ -45,26 +67,60 @@ func (q *MemQueue) Enqueue(ctx context.Context, job []byte) error {
 	}
 }
 
-func (q *MemQueue) Consume(ctx context.Context, handle func([][]byte)) {
+func (q *MemQueue) Consume(ctx context.Context, handle Handler) {
+	type retry struct {
+		job      []byte
+		attempts int
+	}
+	var retries []retry
 	for {
 		var batch [][]byte
-		select {
-		case <-ctx.Done():
-			return
-		case j := <-q.ch:
-			batch = append(batch, j)
-		}
-	drain:
-		for len(batch) < 64 {
+		var attempts []int
+		if len(retries) > 0 {
 			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(q.RetryDelay):
+			}
+			for _, r := range retries {
+				batch = append(batch, r.job)
+				attempts = append(attempts, r.attempts)
+			}
+			retries = nil
+		} else {
+			select {
+			case <-ctx.Done():
+				return
 			case j := <-q.ch:
 				batch = append(batch, j)
-			default:
-				break drain
+				attempts = append(attempts, 0)
+			}
+		drain:
+			for len(batch) < 64 {
+				select {
+				case j := <-q.ch:
+					batch = append(batch, j)
+					attempts = append(attempts, 0)
+				default:
+					break drain
+				}
 			}
 		}
-		handle(batch)
-		q.pending.Add(-int64(len(batch)))
+		errs := handle(batch)
+		for i, job := range batch {
+			err := failed(errs, i)
+			switch {
+			case err == nil:
+				q.pending.Add(-1)
+			case attempts[i]+1 >= MaxAttempts:
+				q.pending.Add(-1)
+				if q.OnDrop != nil {
+					q.OnDrop(job, err)
+				}
+			default:
+				retries = append(retries, retry{job, attempts[i] + 1})
+			}
+		}
 	}
 }
 

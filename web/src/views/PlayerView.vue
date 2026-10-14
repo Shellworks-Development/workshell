@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, ExternalLink, ScrollText } from 'lucide-vue-next'
+import { ArrowLeft, ExternalLink, ScrollText, Trash2 } from 'lucide-vue-next'
 import { RouterLink, useRouter } from 'vue-router'
 import Badge from '@/components/Badge.vue'
 import ErrorBanner from '@/components/ErrorBanner.vue'
@@ -9,6 +9,7 @@ import StatCard from '@/components/StatCard.vue'
 import Timeline from '@/components/Timeline.vue'
 import { api, type Session, type TimelineItem } from '@/lib/api'
 import { duration, num, robux, shortId } from '@/lib/format'
+import { confirmDialog, toast } from '@/lib/overlay'
 import { useProject } from '@/lib/project'
 import { useAsync } from '@/lib/useAsync'
 import SendButton from '@/components/whiteboard/SendButton.vue'
@@ -35,6 +36,28 @@ const { data, error } = useAsync(
   },
   [pid, () => props.userId],
 )
+
+async function erase() {
+  const id = String(data.value!.player.userId)
+  const ok = await confirmDialog({
+    title: `Erase player ${id}?`,
+    message:
+      'Deletes this player’s sessions, logs, events, errors, traces, detections and whiteboard snapshots from this project. Issue totals keep their counts. This can’t be undone.',
+    confirmLabel: 'Erase player data',
+    danger: true,
+    typeToConfirm: id,
+  })
+  if (!ok) return
+  try {
+    // Opened by Roblox id in a pseudonymous project: erase both the hashed and any raw rows.
+    const raw = id !== props.userId
+    const res = await api.del<{ rows: number }>(`/projects/${pid.value}/players/${raw ? props.userId : id}${raw ? '?raw=1' : ''}`)
+    toast(`Erased player ${id}`, `${num(res.rows)} records deleted.`)
+    router.replace({ name: 'players', params: { pid: pid.value } })
+  } catch (e) {
+    toast.error('Couldn’t erase player', (e as Error).message)
+  }
+}
 </script>
 
 <template>
@@ -52,12 +75,13 @@ const { data, error } = useAsync(
         </div>
         <p class="mt-1 text-[13px] text-muted">First played <RelTime :ts="data.player.firstSeen" /> · last played <RelTime :ts="data.player.lastSeen" /></p>
       </div>
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2">
         <SendButton small :build="() => playerSnap(data!.player, data!.timeline, pid)" />
         <RouterLink :to="{ name: 'logs', params: { pid }, query: { userId: String(data.player.userId) } }" class="btn btn-sm"><ScrollText class="size-3.5" /> Logs</RouterLink>
         <a v-if="!data.hashedIds" :href="`https://www.roblox.com/users/${data.player.userId}/profile`" target="_blank" rel="noopener noreferrer" class="btn btn-sm">
           <ExternalLink class="size-3.5" /> Roblox profile
         </a>
+        <button class="btn btn-sm text-danger" @click="erase"><Trash2 class="size-3.5" /> Erase player data</button>
       </div>
     </div>
 
