@@ -10,6 +10,8 @@
 </p>
 
 <p align="center">
+  <a href="https://workshell.shellworks.dev">Website</a> ·
+  <a href="https://workshell.shellworks.dev/docs/">Docs</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#install-the-sdk">SDK</a> ·
   <a href="#security">Security</a> ·
