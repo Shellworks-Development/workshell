@@ -195,7 +195,7 @@ export function traceItems(traceId: string, spans: TraceSpan[], link: string): B
     }
     const fields: [string, string][] = [
       ['Duration', spanMs(s.durationMs)],
-      ['Starts', `+${spanMs(s.start - (parent?.start ?? t0))}`],
+      ['Starts', `+${spanMs(Math.max(0, s.start - (parent?.start ?? t0)))}`],
     ]
     items.push({
       id,
