@@ -4,7 +4,7 @@ import "net/http"
 
 func (s *Server) handleListMetrics(w http.ResponseWriter, r *http.Request, p *project) error {
 	tr := parseRange(r, "24h")
-	rows, err := s.db.R.QueryContext(r.Context(), `
+	rows, err := s.queryTelemetry(r.Context(), `
 		SELECT name, kind, SUM(count), SUM(sum), MIN(min), MAX(max), MAX(ts)
 		FROM metrics WHERE project_id = ? AND ts >= ? AND ts < ?
 		GROUP BY name, kind ORDER BY name`, p.ID, tr.From, tr.To)
@@ -29,6 +29,9 @@ func (s *Server) handleListMetrics(w http.ResponseWriter, r *http.Request, p *pr
 		}
 		out = append(out, x)
 	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	return ok(w, out)
 }
 
@@ -42,7 +45,7 @@ func (s *Server) handleMetricSeries(w http.ResponseWriter, r *http.Request, p *p
 	}
 	job := r.URL.Query().Get("jobId")
 	ts := newTimeseries(tr, "sum", "avg", "min", "max", "count")
-	rows, err := s.db.R.QueryContext(r.Context(), `
+	rows, err := s.queryTelemetry(r.Context(), `
 		SELECT (ts - ?2) / ?4 * ?4 + ?2, SUM(sum), SUM(sum) / MAX(SUM(count), 1), MIN(min), MAX(max), SUM(count)
 		FROM metrics
 		WHERE project_id = ?1 AND name = ?5 AND ts >= ?2 AND ts < ?3 AND (?6 = '' OR job_id = ?6)
@@ -60,6 +63,9 @@ func (s *Server) handleMetricSeries(w http.ResponseWriter, r *http.Request, p *p
 		for i := range v {
 			ts.set(i, b, v[i])
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
 	}
 	return ok(w, ts)
 }

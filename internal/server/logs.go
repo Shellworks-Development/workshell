@@ -69,7 +69,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request, p *project) 
 	}
 	args = append(args, limit)
 
-	rows, err := s.db.R.QueryContext(r.Context(), `
+	rows, err := s.queryTelemetry(r.Context(), `
 		SELECT id, ts, level, message, job_id, user_id, source, attrs FROM logs
 		WHERE `+strings.Join(where, " AND ")+` ORDER BY `+order+` LIMIT ?`, args...)
 	if err != nil {
@@ -100,7 +100,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request, p *project) 
 	resp := map[string]any{"logs": logs}
 	if q.Get("histogram") == "1" {
 		hist := newTimeseries(tr, logLevels...)
-		rows, err := s.db.R.QueryContext(r.Context(), `
+		rows, err := s.queryTelemetry(r.Context(), `
 			SELECT (ts - ?) / ? * ? + ?, level, COUNT(*) FROM logs
 			WHERE `+filterWhere+` GROUP BY 1, 2`,
 			append([]any{tr.From, tr.Bucket, tr.Bucket, tr.From}, filterArgs...)...)
@@ -119,6 +119,9 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request, p *project) 
 					hist.set(i, b, float64(n))
 				}
 			}
+		}
+		if err := rows.Err(); err != nil {
+			return err
 		}
 		resp["histogram"] = hist
 	}

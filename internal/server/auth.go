@@ -149,17 +149,22 @@ func (s *Server) handleAuthState(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	hasPassword := false
+	emailManaged := false
 	if u != nil {
 		var hash string
 		if err := s.db.R.QueryRowContext(r.Context(), `SELECT password_hash FROM users WHERE id = ?`, u.ID).Scan(&hash); err != nil {
 			return err
 		}
 		hasPassword = hash != ""
+		if err := s.db.R.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM user_identities WHERE user_id = ?)`, u.ID).Scan(&emailManaged); err != nil {
+			return err
+		}
 	}
 	return ok(w, map[string]any{
 		"setupRequired": n == 0,
 		"user":          u,
 		"hasPassword":   hasPassword,
+		"emailManaged":  emailManaged,
 		"publicUrl":     s.cfg.PublicURL,
 		"sso":           s.ssoState(),
 		"ssoError":      ssoError,
@@ -610,4 +615,66 @@ func (s *Server) handleReadNotifications(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	return ok(w, map[string]any{"ok": true})
+}
+
+// handleChangeEmail requires a local password. Linked SSO accounts keep their
+// provider-managed identity; changing an email never unlinks that identity.
+func (s *Server) handleChangeEmail(w http.ResponseWriter, r *http.Request, u *user) error {
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"currentPassword"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		return err
+	}
+	email := strings.TrimSpace(body.Email)
+	addr, err := mail.ParseAddress(email)
+	if err != nil || addr.Address != email || len(email) > 254 {
+		return badRequest("enter a valid email address without a display name")
+	}
+	var hash string
+	if err := s.db.R.QueryRowContext(r.Context(), `SELECT password_hash FROM users WHERE id = ?`, u.ID).Scan(&hash); err != nil {
+		return err
+	}
+	if hash == "" || s.cfg.NoPasswordLogin {
+		return errStatus(http.StatusForbidden, "your email is managed by your sign-in provider")
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(body.Password)) != nil {
+		return badRequest("current password is incorrect")
+	}
+	current, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return errUnauthorized
+	}
+	err = s.db.Tx(r.Context(), func(tx *sql.Tx) error {
+		var linked bool
+		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM user_identities WHERE user_id = ?)`, u.ID).Scan(&linked); err != nil {
+			return err
+		}
+		if linked {
+			return errStatus(http.StatusForbidden, "your email is managed by your sign-in provider")
+		}
+		// Compare the hash too, so a concurrent password change cannot authorize
+		// this request using a password that is no longer current.
+		res, err := tx.ExecContext(r.Context(), `UPDATE users SET email = ? WHERE id = ? AND password_hash = ?`, email, u.ID, hash)
+		if err != nil {
+			if strings.Contains(err.Error(), "UNIQUE constraint failed: users.email") {
+				return errStatus(http.StatusConflict, "a user with that email already exists")
+			}
+			return err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return errStatus(http.StatusConflict, "your password changed; try again with your current password")
+		}
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM sessions WHERE user_id = ? AND token_hash != ?`, u.ID, hashToken(current.Value)); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(r.Context(), `INSERT INTO audit_log (user_id, action, created_at) VALUES (?, 'user.email.change', ?)`, u.ID, nowMs())
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	u.Email = email
+	return ok(w, u)
 }

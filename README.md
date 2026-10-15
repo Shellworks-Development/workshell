@@ -211,6 +211,10 @@ Found a vulnerability? Please report it privately; see [SECURITY.md](SECURITY.md
 | `WORKSHELL_PUBLIC_URL` | | Public URL, used in setup snippets and alert links |
 | `WORKSHELL_SECRET_KEY` | generated | 32-byte hex or base64 key that encrypts stored secrets |
 | `WORKSHELL_REDIS_URL` | | e.g. `redis://localhost:6379/0`: a durable ingest queue that survives restarts, and live updates shared between instances. The database is still one SQLite file. |
+| `WORKSHELL_CLICKHOUSE_URL` | | Optional ClickHouse HTTP(S) endpoint, e.g. `http://localhost:8123`; unset keeps telemetry in SQLite |
+| `WORKSHELL_CLICKHOUSE_DATABASE` | `default` | Existing database dedicated to this Workshell instance |
+| `WORKSHELL_CLICKHOUSE_USER`, `_PASSWORD` | `default`, empty | ClickHouse credentials (sent in HTTP headers) |
+| `WORKSHELL_CLICKHOUSE_MIGRATE` | `false` | Explicitly permit moving existing SQLite telemetry during startup |
 | `WORKSHELL_SECURE_COOKIES` | `false` | Set to `true` when served over HTTPS |
 | `WORKSHELL_TRUST_PROXY` | `false` | Trust `X-Forwarded-*` headers from a reverse proxy |
 | `WORKSHELL_MAX_INGEST_BYTES` | `8388608` | Maximum decompressed ingest request size |
@@ -228,12 +232,37 @@ Retention is set per project. By default logs, traces and health data are kept f
 
 ### Capacity
 
-Workshell stores everything in one SQLite database with a single writer. Redis makes the ingest queue durable; it does not make the database scale horizontally. Measured on one machine (an 8-core Ryzen 7 5700X), with 100 simulated game servers sending 1.1 million items over 9 minutes while six dashboard pages were polled throughout:
+By default, Workshell stores everything in one SQLite database with a single writer. The optional ClickHouse backend below offloads five telemetry datasets. Redis makes the ingest queue durable; it does not make the database scale horizontally. Measured on one machine (an 8-core Ryzen 7 5700X), with 100 simulated game servers sending 1.1 million items over 9 minutes while six dashboard pages were polled throughout:
 
 - Ingest kept up the whole time; everything was written within 2 seconds of the last send, and nothing errored.
 - Issues, logs and sessions answered in about 11 ms or less (p95). The overview answered in about 230 ms, server health in about 360 ms, and the performance page, which scans a day of traces, in about 760 ms (all p95).
 
 Expect the analytics-style pages (performance, server health) to slow down as a project's history grows into tens of millions of rows. Load-test with your own traffic before relying on it for a large game.
+
+### Optional ClickHouse for high-volume telemetry
+
+Set `WORKSHELL_CLICKHOUSE_URL` to move **logs, heartbeats, custom metrics, spans, and client performance samples** to ClickHouse. Their dashboard queries, timelines, retention, and player erasure use the same backend. Accounts, projects, issues, error samples, sessions, custom events, and detections remain in SQLite. This reduces indexed telemetry writes and history scans in SQLite; it does not make the application horizontally scalable. Capacity with ClickHouse has not yet been benchmarked.
+
+```sh
+WORKSHELL_CLICKHOUSE_URL=http://localhost:8123 \
+WORKSHELL_CLICKHOUSE_DATABASE=workshell \
+WORKSHELL_CLICKHOUSE_USER=workshell \
+WORKSHELL_CLICKHOUSE_PASSWORD=your-password \
+./bin/workshell
+```
+
+Create the database first. Use a dedicated database per Workshell data directory and a user with `CREATE TABLE`, `SELECT`, `INSERT`, and `ALTER DELETE` permissions on it. Use HTTPS for remote connections. The optional Compose override in [docker-compose.clickhouse.yml](docker-compose.clickhouse.yml) starts a local ClickHouse service:
+
+```sh
+# Set WORKSHELL_CLICKHOUSE_PASSWORD in your environment or Compose .env first.
+docker compose -f docker-compose.yml -f docker-compose.clickhouse.yml up -d
+```
+
+For an existing installation, stop the server, back up the data directory, and set `WORKSHELL_CLICKHOUSE_MIGRATE=true` for the first ClickHouse startup. Startup copies history in bounded batches and removes each SQLite batch only after ClickHouse accepts it. Interrupted migrations resume on the next startup with the same settings. Remove the migration flag after completion. Keep the ClickHouse configuration thereafter: removing it is refused to prevent hiding history. Returning to SQLite requires exporting and restoring that history; there is no automatic reverse migration. Back up both databases together.
+
+Ingest commits normalized telemetry to a durable SQLite outbox with the application changes. A background sender batches delivery; history can lag live updates by a second or longer during backlog recovery. Failed delivery stays in the outbox across restarts, and stable row IDs prevent duplicate query results after retries. At approximately 10,000 queued batches, ingestion returns `503` with `Retry-After` so SDKs can back off. Monitor SQLite disk space and delivery errors during outages. Retention and erasure drain pending writes before deleting history and fail if ClickHouse is unavailable, allowing a later retry.
+
+Profile settings also let local-password users change their account email after confirming their current password. Other sessions are signed out. Linked SSO accounts keep their email managed by the identity provider; this flow does not send verification emails.
 
 ## Development
 
@@ -242,6 +271,16 @@ make dev        # server on :8080
 make dev-web    # dashboard with hot reload on :5173, reachable on your LAN for phone testing
 make test       # Go tests, dashboard type check, SDK tests (needs `luau`)
 ```
+
+To run the ClickHouse integration tests locally, use a disposable instance whose default user can create/drop test databases:
+
+```sh
+WORKSHELL_TEST_CLICKHOUSE_URL=http://localhost:8123 \
+WORKSHELL_TEST_CLICKHOUSE_PASSWORD=your-test-password \
+go test ./internal/server -run TestClickHouse -v
+```
+
+CI runs these tests against ClickHouse 25.8 alongside the default SQLite tests.
 
 <details>
 <summary><b>Repository layout and ingest protocol</b></summary>

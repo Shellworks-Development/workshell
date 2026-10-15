@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/workshell/workshell/internal/secure"
+	"github.com/workshell/workshell/internal/telemetry"
 )
 
 type sessionRow struct {
@@ -119,8 +120,14 @@ func (s *Server) timeline(ctx context.Context, p *project, sessionKey string, us
 	// Rows tagged with the session id, plus untagged rows from the same player
 	// in the session's time window. Two indexed queries rather than an OR.
 	args := []any{p.ID, sessionKey, userID, from, to}
-	q := func(cols, table, tsCol string) (*sql.Rows, error) {
-		return s.db.R.QueryContext(ctx, `SELECT * FROM (
+	q := func(cols, table, tsCol string) (telemetry.Rows, error) {
+		query := s.queryTelemetry
+		if !telemetry.IsTable(table) {
+			query = func(ctx context.Context, q string, args ...any) (telemetry.Rows, error) {
+				return s.db.R.QueryContext(ctx, q, args...)
+			}
+		}
+		return query(ctx, `SELECT * FROM (
 			SELECT `+cols+` FROM `+table+` WHERE project_id = ?1 AND ?2 != '' AND session_key = ?2
 			UNION ALL
 			SELECT `+cols+` FROM `+table+` WHERE project_id = ?1 AND user_id = ?3 AND `+tsCol+` BETWEEN ?4 AND ?5 AND (?2 = '' OR session_key = '')
@@ -145,6 +152,10 @@ func (s *Server) timeline(ctx context.Context, p *project, sessionKey string, us
 		}
 		items = append(items, timelineItem{TS: ts, Kind: kind, Title: name, Data: map[string]any{"value": value, "props": json.RawMessage(props)}})
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
 	rows.Close()
 
 	rows, err = q(`ts, level, message, source, attrs`, "logs", "ts")
@@ -159,6 +170,10 @@ func (s *Server) timeline(ctx context.Context, p *project, sessionKey string, us
 			return nil, err
 		}
 		items = append(items, timelineItem{TS: ts, Kind: "log", Title: truncate(msg, 500), Level: level, Data: map[string]any{"source": source, "attrs": json.RawMessage(attrs)}})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
 	}
 	rows.Close()
 
@@ -177,6 +192,10 @@ func (s *Server) timeline(ctx context.Context, p *project, sessionKey string, us
 		items = append(items, timelineItem{TS: ts, Kind: "error", Title: truncate(text, 300), Level: "error",
 			Data: map[string]any{"issueId": issue, "side": side, "message": msg, "breadcrumbs": json.RawMessage(crumbs)}})
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
 	rows.Close()
 
 	rows, err = q(`ts, name, duration_ms, status`, "spans", "ts")
@@ -193,6 +212,10 @@ func (s *Server) timeline(ctx context.Context, p *project, sessionKey string, us
 		}
 		items = append(items, timelineItem{TS: ts, Kind: "span", Title: name, Data: map[string]any{"durationMs": dur, "status": status}})
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
 	rows.Close()
 
 	rows, err = q(`ts, kind, severity, action, source, details`, "detections", "ts")
@@ -208,6 +231,10 @@ func (s *Server) timeline(ctx context.Context, p *project, sessionKey string, us
 		}
 		items = append(items, timelineItem{TS: ts, Kind: "detection", Title: kind, Level: severity,
 			Data: map[string]any{"action": action, "source": source, "details": json.RawMessage(details)}})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
 	}
 	rows.Close()
 
@@ -247,7 +274,7 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request, p *pro
 		PingMs   float64 `json:"pingMs"`
 	}
 	perfs := []perf{}
-	rows, err := s.db.R.QueryContext(r.Context(), `SELECT ts, fps, memory_mb, ping_ms FROM client_perf WHERE project_id = ? AND session_key = ? ORDER BY ts LIMIT 2000`, p.ID, ss.Key)
+	rows, err := s.queryTelemetry(r.Context(), `SELECT ts, fps, memory_mb, ping_ms FROM client_perf WHERE project_id = ? AND session_key = ? ORDER BY ts LIMIT 2000`, p.ID, ss.Key)
 	if err != nil {
 		return err
 	}
@@ -258,6 +285,9 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request, p *pro
 			return err
 		}
 		perfs = append(perfs, x)
+	}
+	if err := rows.Err(); err != nil {
+		return err
 	}
 	return ok(w, map[string]any{"session": ss, "timeline": items, "perf": perfs, "hashedIds": p.HashUserIDs})
 }

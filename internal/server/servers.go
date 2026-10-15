@@ -69,7 +69,7 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request, p *pr
 // server (jobID set) or averaged across all servers.
 func (s *Server) serverSeries(ctx context.Context, projectID int64, tr timeRange, jobID string) (*timeseries, error) {
 	ts := newTimeseries(tr, "servers", "fps", "heartbeatMs", "memoryMb", "pingMs", "instances", "sendKbps", "recvKbps")
-	rows, err := s.db.R.QueryContext(ctx, `
+	rows, err := s.queryTelemetry(ctx, `
 		SELECT (ts - ?2) / ?4 * ?4 + ?2, COUNT(DISTINCT job_id), AVG(fps), AVG(heartbeat_ms), AVG(memory_mb),
 			AVG(ping_ms), AVG(instances), AVG(send_kbps), AVG(recv_kbps)
 		FROM heartbeats
@@ -131,11 +131,26 @@ func (s *Server) handleGetServer(w http.ResponseWriter, r *http.Request, p *proj
 	err = s.db.R.QueryRowContext(r.Context(), `
 		SELECT
 			(SELECT COALESCE(SUM(count), 0) FROM error_events WHERE project_id = ?1 AND job_id = ?2),
-			(SELECT COUNT(*) FROM logs WHERE project_id = ?1 AND job_id = ?2 AND ts >= ?3),
 			(SELECT COUNT(*) FROM play_sessions WHERE project_id = ?1 AND job_id = ?2 AND started_at >= ?3)`,
-		p.ID, jobID, g.StartedAt).Scan(&errorCount, &logCount, &sessionCount)
+		p.ID, jobID, g.StartedAt).Scan(&errorCount, &sessionCount)
 	if err != nil {
 		return err
+	}
+
+	countRows, err := s.queryTelemetry(r.Context(), `SELECT COUNT(*) FROM logs WHERE project_id = ? AND job_id = ? AND ts >= ?`, p.ID, jobID, g.StartedAt)
+	if err != nil {
+		return err
+	}
+	if countRows.Next() {
+		err = countRows.Scan(&logCount)
+	}
+	readErr := countRows.Err()
+	countRows.Close()
+	if err != nil {
+		return err
+	}
+	if readErr != nil {
+		return readErr
 	}
 
 	issues := []map[string]any{}

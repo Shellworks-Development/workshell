@@ -4,6 +4,8 @@ import (
 	"context"
 	"strconv"
 	"time"
+
+	"github.com/workshell/workshell/internal/telemetry"
 )
 
 // runRetention deletes telemetry older than each project's retention settings.
@@ -11,6 +13,14 @@ import (
 // out; a player record goes once the player hasn't played for the data
 // retention period (if they come back, they count as a new player).
 func (s *Server) runRetention(ctx context.Context) {
+	if s.telemetry != nil {
+		s.telemetryGuard.Lock()
+		defer s.telemetryGuard.Unlock()
+		if err := s.drainTelemetryLocked(ctx); err != nil {
+			s.log.Error("retention: ClickHouse outbox must drain before deleting history", "err", err)
+			return
+		}
+	}
 	// Idempotency keys only need to outlive redelivery (minutes to hours).
 	if _, err := s.db.W.ExecContext(ctx, `DELETE FROM ingested_batches WHERE received_at < ?`, nowMs()-int64(48*time.Hour/time.Millisecond)); err != nil {
 		s.log.Error("retention: ingested batches", "err", err)
@@ -45,6 +55,24 @@ func (s *Server) runRetention(ctx context.Context) {
 	for _, p := range projects {
 		logCutoff := now - p.logDays*dayMs
 		dataCutoff := now - p.dataDays*dayMs
+		if s.telemetry != nil {
+			remoteOK := true
+			for _, table := range telemetry.Tables {
+				cutoff := logCutoff
+				if table == "metrics" {
+					cutoff = dataCutoff
+				}
+				if err := s.telemetry.Delete(ctx, table, `project_id = ? AND ts < ?`, p.id, cutoff); err != nil {
+					s.log.Error("ClickHouse retention", "project", p.id, "table", table, "err", err)
+					remoteOK = false
+					break
+				}
+			}
+			// Preserve session keys needed to erase remote samples if a deletion failed.
+			if !remoteOK {
+				continue
+			}
+		}
 		for _, q := range []struct {
 			table, where string
 			cutoff       int64
@@ -63,6 +91,9 @@ func (s *Server) runRetention(ctx context.Context) {
 			{"alert_history", "created_at < ?", dataCutoff},
 			{"audit_log", "created_at < ?", max(dataCutoff, now-365*dayMs)},
 		} {
+			if s.telemetry != nil && telemetry.IsTable(q.table) {
+				continue
+			}
 			if err := s.deleteInChunks(ctx, q.table, q.where, p.id, q.cutoff); err != nil {
 				s.log.Error("retention", "project", p.id, "table", q.table, "err", err)
 			}

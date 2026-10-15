@@ -45,7 +45,7 @@ func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request, p *pr
 		sum    float64
 	}
 	byName := map[string]*agg{}
-	rows, err := s.db.R.QueryContext(ctx, `SELECT name, duration_ms, status FROM spans WHERE project_id = ? AND ts >= ? AND ts < ? LIMIT ?`,
+	rows, err := s.queryTelemetry(ctx, `SELECT name, duration_ms, status FROM spans WHERE project_id = ? AND ts >= ? AND ts < ? LIMIT ?`,
 		p.ID, tr.From, tr.To, maxSpanScan)
 	if err != nil {
 		return err
@@ -102,7 +102,7 @@ func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request, p *pr
 	type sums struct{ n, fps, ping, mem, low float64 }
 	plat := map[string]*sums{}
 	buckets := map[int64]*sums{}
-	rows, err = s.db.R.QueryContext(ctx, `SELECT ts, platform, fps, ping_ms, memory_mb FROM client_perf WHERE project_id = ? AND ts >= ? AND ts < ?`,
+	rows, err = s.queryTelemetry(ctx, `SELECT ts, platform, fps, ping_ms, memory_mb FROM client_perf WHERE project_id = ? AND ts >= ? AND ts < ?`,
 		p.ID, tr.From, tr.To)
 	if err != nil {
 		return err
@@ -170,7 +170,7 @@ func (s *Server) handleSpanDetail(w http.ResponseWriter, r *http.Request, p *pro
 		return badRequest("name is required")
 	}
 	tr := parseRange(r, "24h")
-	rows, err := s.db.R.QueryContext(r.Context(), `SELECT ts, duration_ms, status FROM spans WHERE project_id = ? AND name = ? AND ts >= ? AND ts < ? LIMIT ?`,
+	rows, err := s.queryTelemetry(r.Context(), `SELECT ts, duration_ms, status FROM spans WHERE project_id = ? AND name = ? AND ts >= ? AND ts < ? LIMIT ?`,
 		p.ID, name, tr.From, tr.To, maxSpanSample)
 	if err != nil {
 		return err
@@ -192,6 +192,9 @@ func (s *Server) handleSpanDetail(w http.ResponseWriter, r *http.Request, p *pro
 		}
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	ts := newTimeseries(tr, "p50", "p95", "count", "errors")
 	for b, d := range buckets {
 		sort.Float64s(d)
@@ -213,7 +216,7 @@ func (s *Server) handleSpanDetail(w http.ResponseWriter, r *http.Request, p *pro
 		TraceID    string  `json:"traceId"`
 	}
 	slowest := []slow{}
-	rows, err = s.db.R.QueryContext(r.Context(), `SELECT ts, duration_ms, status, session_key, user_id, job_id, release, attrs, trace_id FROM spans
+	rows, err = s.queryTelemetry(r.Context(), `SELECT ts, duration_ms, status, session_key, user_id, job_id, release, attrs, trace_id FROM spans
 		WHERE project_id = ? AND name = ? AND ts >= ? AND ts < ? ORDER BY duration_ms DESC LIMIT 20`, p.ID, name, tr.From, tr.To)
 	if err != nil {
 		return err
@@ -227,6 +230,9 @@ func (s *Server) handleSpanDetail(w http.ResponseWriter, r *http.Request, p *pro
 		slowest = append(slowest, x)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
 	type byRelease struct {
 		Release string  `json:"release"`
@@ -234,7 +240,7 @@ func (s *Server) handleSpanDetail(w http.ResponseWriter, r *http.Request, p *pro
 		AvgMs   float64 `json:"avgMs"`
 	}
 	releases := []byRelease{}
-	rows, err = s.db.R.QueryContext(r.Context(), `SELECT release, COUNT(*), AVG(duration_ms) FROM spans
+	rows, err = s.queryTelemetry(r.Context(), `SELECT release, COUNT(*), AVG(duration_ms) FROM spans
 		WHERE project_id = ? AND name = ? AND ts >= ? AND ts < ? GROUP BY release ORDER BY MAX(ts) DESC LIMIT 10`, p.ID, name, tr.From, tr.To)
 	if err != nil {
 		return err
@@ -246,6 +252,9 @@ func (s *Server) handleSpanDetail(w http.ResponseWriter, r *http.Request, p *pro
 			return err
 		}
 		releases = append(releases, x)
+	}
+	if err := rows.Err(); err != nil {
+		return err
 	}
 	return ok(w, map[string]any{"series": ts, "slowest": slowest, "releases": releases})
 }
@@ -270,7 +279,7 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request, p *project)
 		Release    string  `json:"release"`
 		Attrs      string  `json:"attrs"`
 	}
-	rows, err := s.db.R.QueryContext(r.Context(), `SELECT span_id, parent, name, ts, duration_ms, status, user_id, job_id, session_key, release, attrs
+	rows, err := s.queryTelemetry(r.Context(), `SELECT span_id, parent, name, ts, duration_ms, status, user_id, job_id, session_key, release, attrs
 		FROM spans WHERE project_id = ? AND trace_id = ? ORDER BY ts - duration_ms LIMIT 500`, p.ID, traceID)
 	if err != nil {
 		return err
@@ -289,6 +298,9 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request, p *project)
 			x.SpanID = traceID
 		}
 		spans = append(spans, x)
+	}
+	if err := rows.Err(); err != nil {
+		return err
 	}
 	if len(spans) == 0 {
 		return errNotFound

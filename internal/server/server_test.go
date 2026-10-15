@@ -34,7 +34,9 @@ func (e *testEnv) settle() {
 	}
 }
 
-func newTestEnv(t *testing.T) *testEnv {
+func newTestEnv(t *testing.T) *testEnv { return newTestEnvOptions(t, nil) }
+
+func newTestEnvOptions(t *testing.T, configure func(*Options)) *testEnv {
 	t.Helper()
 	database, err := db.Open(t.TempDir())
 	if err != nil {
@@ -45,8 +47,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	box, _ := secure.NewBox(make([]byte, 32))
 	queue := pipeline.NewMemQueue(100)
-	s := New(Options{Config: cfg, DB: database, Log: log, Web: fstest.MapFS{}, SDK: fstest.MapFS{"init.luau": {Data: []byte("return 1")}},
-		Box: box, Queue: queue, Broker: pipeline.NewMemBroker()})
+	opts := Options{Config: cfg, DB: database, Log: log, Web: fstest.MapFS{}, SDK: fstest.MapFS{"init.luau": {Data: []byte("return 1")}},
+		Box: box, Queue: queue, Broker: pipeline.NewMemBroker()}
+	if configure != nil {
+		configure(&opts)
+	}
+	s := New(opts)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	s.Run(ctx)

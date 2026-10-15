@@ -473,4 +473,19 @@ CREATE TABLE user_identities (
 ) WITHOUT ROWID;
 CREATE INDEX user_identities_user ON user_identities(user_id);
 `,
+	// v8: durable outbox and stable ids for optional ClickHouse telemetry.
+	`
+CREATE TABLE telemetry_state (
+ id INTEGER PRIMARY KEY CHECK (id = 1),
+ backend TEXT NOT NULL DEFAULT 'sqlite',
+ next_id INTEGER NOT NULL DEFAULT 1
+);
+INSERT INTO telemetry_state (id) VALUES (1);
+CREATE TABLE telemetry_outbox (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ payload BLOB NOT NULL,
+ created_at INTEGER NOT NULL
+);
+`,
 }

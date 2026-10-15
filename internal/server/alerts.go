@@ -256,7 +256,20 @@ func (s *Server) evaluateAlertRules(ctx context.Context) {
 		case "fps_below":
 			q = `SELECT COALESCE(AVG(fps), 0), COUNT(DISTINCT job_id) FROM heartbeats WHERE project_id = ?1 AND ts >= ?2`
 		}
-		if err := s.db.R.QueryRowContext(ctx, q, rule.projectID, since, cutoff).Scan(&v, &live); err != nil {
+		if rule.Kind == "fps_below" {
+			rows, err := s.queryTelemetry(ctx, q, rule.projectID, since, cutoff)
+			if err != nil {
+				continue
+			}
+			if rows.Next() {
+				err = rows.Scan(&v, &live)
+			}
+			readErr := rows.Err()
+			rows.Close()
+			if err != nil || readErr != nil {
+				continue
+			}
+		} else if err := s.db.R.QueryRowContext(ctx, q, rule.projectID, since, cutoff).Scan(&v, &live); err != nil {
 			continue
 		}
 		var hit bool

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/workshell/workshell/internal/secure"
+	"github.com/workshell/workshell/internal/telemetry"
 )
 
 // liveWindow is how recently a game server must have sent a heartbeat to count as live.
@@ -246,6 +247,18 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request, p *
 }
 
 func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request, p *project, u *user) error {
+	if s.telemetry != nil {
+		s.telemetryGuard.Lock()
+		defer s.telemetryGuard.Unlock()
+		if err := s.drainTelemetryLocked(r.Context()); err != nil {
+			return err
+		}
+		for _, table := range telemetry.Tables {
+			if err := s.telemetry.Delete(r.Context(), table, `project_id = ?`, p.ID); err != nil {
+				return err
+			}
+		}
+	}
 	if _, err := s.db.W.ExecContext(r.Context(), `DELETE FROM projects WHERE id = ?`, p.ID); err != nil {
 		return err
 	}
@@ -472,7 +485,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request, p *proje
 // If jobID is set, only that server is included.
 func (s *Server) ccuSeries(r *http.Request, projectID int64, tr timeRange, jobID string) (*timeseries, error) {
 	ts := newTimeseries(tr, "players")
-	rows, err := s.db.R.QueryContext(r.Context(), `
+	rows, err := s.queryTelemetry(r.Context(), `
 		SELECT b, SUM(p) FROM (
 			SELECT (ts - ?2) / ?4 * ?4 + ?2 AS b, job_id, AVG(players) AS p
 			FROM heartbeats

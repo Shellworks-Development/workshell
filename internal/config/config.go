@@ -31,6 +31,13 @@ type Config struct {
 	// (e.g. redis://localhost:6379/0). Empty = in-process queue.
 	RedisURL string
 
+	// Optional ClickHouse HTTP telemetry backend. The database must exist.
+	ClickHouseURL      string
+	ClickHouseDatabase string
+	ClickHouseUser     string
+	ClickHousePassword string
+	ClickHouseMigrate  bool
+
 	// OIDC single sign-on (Google, Microsoft Entra, Okta, Authentik, ...).
 	// Enabled when OIDCIssuer and OIDCClientID are set; needs PublicURL.
 	OIDCIssuer       string
@@ -54,15 +61,20 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		Addr:           str("WORKSHELL_ADDR", ":8080"),
-		DataDir:        abs(str("WORKSHELL_DATA_DIR", "./data")),
-		PublicURL:      str("WORKSHELL_PUBLIC_URL", ""),
-		SecureCookies:  boolean("WORKSHELL_SECURE_COOKIES", false),
-		TrustProxy:     boolean("WORKSHELL_TRUST_PROXY", false),
-		MaxIngestBytes: int64(integer("WORKSHELL_MAX_INGEST_BYTES", 8<<20)),
-		SessionTTL:     time.Duration(integer("WORKSHELL_SESSION_DAYS", 30)) * 24 * time.Hour,
-		SecretKey:      str("WORKSHELL_SECRET_KEY", ""),
-		RedisURL:       str("WORKSHELL_REDIS_URL", ""),
+		Addr:               str("WORKSHELL_ADDR", ":8080"),
+		DataDir:            abs(str("WORKSHELL_DATA_DIR", "./data")),
+		PublicURL:          str("WORKSHELL_PUBLIC_URL", ""),
+		SecureCookies:      boolean("WORKSHELL_SECURE_COOKIES", false),
+		TrustProxy:         boolean("WORKSHELL_TRUST_PROXY", false),
+		MaxIngestBytes:     int64(integer("WORKSHELL_MAX_INGEST_BYTES", 8<<20)),
+		SessionTTL:         time.Duration(integer("WORKSHELL_SESSION_DAYS", 30)) * 24 * time.Hour,
+		SecretKey:          str("WORKSHELL_SECRET_KEY", ""),
+		RedisURL:           str("WORKSHELL_REDIS_URL", ""),
+		ClickHouseURL:      str("WORKSHELL_CLICKHOUSE_URL", ""),
+		ClickHouseDatabase: str("WORKSHELL_CLICKHOUSE_DATABASE", "default"),
+		ClickHouseUser:     str("WORKSHELL_CLICKHOUSE_USER", "default"),
+		ClickHousePassword: str("WORKSHELL_CLICKHOUSE_PASSWORD", ""),
+		ClickHouseMigrate:  boolean("WORKSHELL_CLICKHOUSE_MIGRATE", false),
 
 		OIDCIssuer:        str("WORKSHELL_OIDC_ISSUER", ""),
 		OIDCClientID:      str("WORKSHELL_OIDC_CLIENT_ID", ""),

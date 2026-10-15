@@ -20,6 +20,7 @@ import (
 	"github.com/workshell/workshell/internal/pipeline"
 	"github.com/workshell/workshell/internal/secure"
 	"github.com/workshell/workshell/internal/server"
+	"github.com/workshell/workshell/internal/telemetry"
 )
 
 var version = "dev"
@@ -78,6 +79,14 @@ func serve(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	var warehouse *telemetry.ClickHouse
+	if cfg.ClickHouseURL != "" {
+		warehouse, err = telemetry.Open(ctx, cfg.ClickHouseURL, cfg.ClickHouseDatabase, cfg.ClickHouseUser, cfg.ClickHousePassword)
+		if err != nil {
+			return err
+		}
+		defer warehouse.Close()
+	}
 	var queue pipeline.Queue = pipeline.NewMemQueue(20_000)
 	var broker pipeline.Broker = pipeline.NewMemBroker()
 	if cfg.RedisURL != "" {
@@ -97,9 +106,12 @@ func serve(log *slog.Logger) error {
 	defer broker.Close()
 
 	srv := server.New(server.Options{
-		Config: cfg, DB: database, Log: log, Web: workshell.WebFS(), SDK: workshell.SDKFS(),
+		Telemetry: warehouse, Config: cfg, DB: database, Log: log, Web: workshell.WebFS(), SDK: workshell.SDKFS(),
 		Box: box, Queue: queue, Broker: broker,
 	})
+	if err := srv.InitTelemetry(ctx); err != nil {
+		return err
+	}
 	srv.Run(ctx)
 
 	httpServer := &http.Server{

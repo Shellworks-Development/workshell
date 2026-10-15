@@ -22,6 +22,7 @@ import (
 
 	"github.com/workshell/workshell/internal/pipeline"
 	"github.com/workshell/workshell/internal/secure"
+	"github.com/workshell/workshell/internal/telemetry"
 )
 
 // envelope is the batch format the Luau SDK POSTs to /api/v1/ingest.
@@ -329,6 +330,16 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) error {
 		return errStatus(http.StatusTooManyRequests, "ingest rate limit exceeded (%d items/s); retry later", int(rate))
 	}
 
+	if s.telemetry != nil {
+		var pending int64
+		if err := s.db.R.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM telemetry_outbox`).Scan(&pending); err != nil {
+			return err
+		}
+		if pending+s.queue.Pending() >= 10000 {
+			w.Header().Set("Retry-After", "5")
+			return errStatus(http.StatusServiceUnavailable, "ClickHouse delivery backlog is full; retry later")
+		}
+	}
 	job := make([]byte, 16+len(body))
 	binary.BigEndian.PutUint64(job, uint64(p.ID))
 	binary.BigEndian.PutUint64(job[8:], uint64(nowMs()))
@@ -519,6 +530,10 @@ type ingestResult struct {
 
 // ingest writes one batch in a single transaction.
 func (s *Server) ingest(ctx context.Context, p *ingestProject, env *envelope, received int64, key []byte) (*ingestResult, error) {
+	if s.telemetry != nil {
+		s.telemetryGuard.RLock()
+		defer s.telemetryGuard.RUnlock()
+	}
 	now := nowMs()
 	jobID := truncate(strings.TrimSpace(env.Server.JobID), 64)
 	if jobID == "" {
@@ -573,6 +588,12 @@ func (s *Server) ingest(ctx context.Context, p *ingestProject, env *envelope, re
 
 		w := &batchWriter{s: s, ctx: ctx, tx: tx, p: p, jobID: jobID, placeVersion: placeVersion, release: release, environment: environment, res: res}
 		defer w.close()
+		if s.telemetry != nil {
+			n := int64(len(env.Items))
+			if err := tx.QueryRowContext(ctx, `UPDATE telemetry_state SET next_id = next_id + ? WHERE id = 1 RETURNING next_id - ?`, n, n).Scan(&w.telemetryID); err != nil {
+				return err
+			}
+		}
 		for i := range env.Items {
 			it := &env.Items[i]
 			if int64(it.TS) <= 0 || int64(it.TS) > now+5*60_000 || int64(it.TS) < now-7*24*3600_000 {
@@ -586,6 +607,15 @@ func (s *Server) ingest(ctx context.Context, p *ingestProject, env *envelope, re
 				return fmt.Errorf("item %d (%s): %w", i, it.Type, err)
 			}
 		}
+		if len(w.telemetryRows) > 0 {
+			payload, err := json.Marshal(w.telemetryRows)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO telemetry_outbox (project_id, payload, created_at) VALUES (?, ?, ?)`, p.ID, payload, received); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	return res, err
@@ -593,6 +623,9 @@ func (s *Server) ingest(ctx context.Context, p *ingestProject, env *envelope, re
 
 // batchWriter writes items for a single ingest batch, reusing prepared statements.
 type batchWriter struct {
+	telemetryID   int64
+	telemetryRows map[string][]telemetry.Row
+
 	s            *Server
 	ctx          context.Context
 	tx           *sql.Tx
@@ -622,6 +655,17 @@ func (w *batchWriter) stmt(query string) (*sql.Stmt, error) {
 }
 
 func (w *batchWriter) exec(query string, args ...any) (sql.Result, error) {
+	if w.s != nil && w.s.telemetry != nil {
+		fields := strings.Fields(query)
+		if len(fields) >= 3 && fields[0] == "INSERT" && fields[1] == "INTO" && telemetry.IsTable(fields[2]) {
+			start := strings.Index(query, "(")
+			end := strings.Index(query, ")")
+			if start < 0 || end <= start {
+				return nil, fmt.Errorf("invalid telemetry INSERT")
+			}
+			return w.telemetryInsert(fields[2], query[start+1:end], args...)
+		}
+	}
 	st, err := w.stmt(query)
 	if err != nil {
 		return nil, err

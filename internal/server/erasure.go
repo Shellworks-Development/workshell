@@ -35,9 +35,18 @@ func erasureIDs(p *project, robloxID int64) []int64 {
 }
 
 // erasePlayer deletes the player's sessions, telemetry, issue links and
-// whiteboard snapshots in one transaction and returns how many rows went.
+// whiteboard snapshots and returns how many rows went. ClickHouse deletions
+// complete before the SQLite transaction commits; failures leave session keys
+// available for a safe retry.
 // Aggregate counters (issue event totals, metrics) stay: they hold no ids.
 func (s *Server) erasePlayer(ctx context.Context, projectID int64, ids []int64) (int64, error) {
+	if s.telemetry != nil {
+		s.telemetryGuard.Lock()
+		defer s.telemetryGuard.Unlock()
+		if err := s.drainTelemetryLocked(ctx); err != nil {
+			return 0, err
+		}
+	}
 	tx, err := s.db.W.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -70,6 +79,48 @@ func (s *Server) erasePlayer(ctx context.Context, projectID int64, ids []int64) 
 		rows.Close()
 	}
 
+	if s.telemetry != nil {
+		eraseRemote := func(table, where string, args ...any) error {
+			rows, err := s.telemetry.Query(ctx, `SELECT COUNT(*) FROM `+table+` WHERE `+where, args...)
+			if err != nil {
+				return err
+			}
+			var n int64
+			if rows.Next() {
+				err = rows.Scan(&n)
+			}
+			readErr := rows.Err()
+			rows.Close()
+			if err != nil {
+				return err
+			}
+			if readErr != nil {
+				return readErr
+			}
+			if n == 0 {
+				return nil
+			}
+			if err := s.telemetry.Delete(ctx, table, where, args...); err != nil {
+				return err
+			}
+			total += n
+			return nil
+		}
+		for _, table := range []string{"logs", "spans", "client_perf"} {
+			for _, k := range sessionKeys {
+				if err := eraseRemote(table, `project_id = ? AND session_key = ?`, projectID, k); err != nil {
+					return 0, err
+				}
+			}
+			if table != "client_perf" {
+				for _, id := range ids {
+					if err := eraseRemote(table, `project_id = ? AND user_id = ?`, projectID, id); err != nil {
+						return 0, err
+					}
+				}
+			}
+		}
+	}
 	// Rows tagged with one of the player's sessions, even where the item itself
 	// carried no user id (client perf, spans and logs often don't).
 	for _, k := range sessionKeys {

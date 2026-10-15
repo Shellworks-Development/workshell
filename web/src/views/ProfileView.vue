@@ -46,6 +46,25 @@ async function onFile(e: Event) {
   }
 }
 
+const emailForm = reactive({ email: auth.user?.email ?? '', currentPassword: '' })
+const emailError = ref<string | null>(null)
+const emailSaving = ref(false)
+async function changeEmail() {
+  if (emailSaving.value) return
+  emailError.value = null
+  emailSaving.value = true
+  try {
+    auth.user = await api.post<User>('/auth/email', emailForm)
+    emailForm.email = auth.user.email
+    emailForm.currentPassword = ''
+    toast('Email changed', 'Use your new email next time you sign in. Your other sessions were signed out.')
+  } catch (e) {
+    emailError.value = (e as Error).message
+  } finally {
+    emailSaving.value = false
+  }
+}
+
 const pw = reactive({ currentPassword: '', newPassword: '' })
 const pwError = ref<string | null>(null)
 async function changePassword() {
@@ -97,6 +116,25 @@ const groups = ['Workshell', 'Catppuccin', 'Rosé Pine', 'Other'] as const
       <div class="flex items-center justify-between rounded-b-xl border-t border-border bg-surface-2/50 px-5 py-3">
         <span class="text-xs text-muted">{{ auth.user?.email }}</span>
         <button class="btn btn-primary" :disabled="saving">Save</button>
+      </div>
+    </form>
+
+    <form class="card" :aria-busy="emailSaving" @submit.prevent="changeEmail">
+      <div class="p-5">
+        <h2 class="text-base font-semibold">Email address</h2>
+        <p v-if="auth.emailManaged || !auth.sso.passwordLogin" class="mt-1 text-[13px] text-muted">Your email is managed by your sign-in provider.</p>
+        <p v-else-if="!auth.hasPassword" class="mt-1 text-[13px] text-muted">Set a password below before changing your email.</p>
+        <template v-else>
+          <p id="email-help" class="mt-1 text-[13px] text-muted">Change the email you use to sign in. Your other sessions will be signed out.</p>
+          <div role="alert"><ErrorBanner :message="emailError" class="mt-4" /></div>
+          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+            <div><label class="label" for="new-email">Email address</label><input id="new-email" v-model="emailForm.email" class="input" type="email" autocomplete="email" maxlength="254" aria-describedby="email-help" :disabled="emailSaving" required /></div>
+            <div><label class="label" for="email-password">Current password</label><input id="email-password" v-model="emailForm.currentPassword" class="input" type="password" autocomplete="current-password" :disabled="emailSaving" required /></div>
+          </div>
+        </template>
+      </div>
+      <div v-if="auth.hasPassword && !auth.emailManaged && auth.sso.passwordLogin" class="flex justify-end rounded-b-xl border-t border-border bg-surface-2/50 px-5 py-3">
+        <button class="btn btn-primary" :disabled="emailSaving || emailForm.email.trim() === auth.user?.email">{{ emailSaving ? 'Changing email…' : 'Change email' }}</button>
       </div>
     </form>
 

@@ -13,16 +13,18 @@ export const auth = reactive({
   setupRequired: false,
   user: null as User | null,
   hasPassword: false,
+  emailManaged: false,
   publicUrl: '',
   sso: { oidc: null, cfAccess: false, passwordLogin: true } as SSOState,
   ssoError: '',
 })
 
 export async function loadAuth() {
-  const s = await api.get<{ setupRequired: boolean; user: User | null; hasPassword: boolean; publicUrl: string; sso: SSOState; ssoError: string }>('/auth/state')
+  const s = await api.get<{ setupRequired: boolean; user: User | null; hasPassword: boolean; emailManaged: boolean; publicUrl: string; sso: SSOState; ssoError: string }>('/auth/state')
   auth.setupRequired = s.setupRequired
   auth.user = s.user
   auth.hasPassword = s.hasPassword
+  auth.emailManaged = s.emailManaged
   auth.publicUrl = s.publicUrl
   auth.sso = s.sso
   auth.ssoError = s.ssoError

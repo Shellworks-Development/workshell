@@ -8,15 +8,21 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/workshell/workshell/internal/config"
 	"github.com/workshell/workshell/internal/db"
 	"github.com/workshell/workshell/internal/pipeline"
 	"github.com/workshell/workshell/internal/secure"
+	"github.com/workshell/workshell/internal/telemetry"
 )
 
 type Server struct {
+	telemetry      *telemetry.ClickHouse
+	telemetryGuard sync.RWMutex // erasure excludes ingest and outbox delivery
+	telemetryFlush sync.Mutex   // one outbox sender
+
 	cfg     config.Config
 	db      *db.DB
 	log     *slog.Logger
@@ -34,6 +40,8 @@ type Server struct {
 }
 
 type Options struct {
+	Telemetry *telemetry.ClickHouse
+
 	Config config.Config
 	DB     *db.DB
 	Log    *slog.Logger
@@ -46,16 +54,17 @@ type Options struct {
 
 func New(o Options) *Server {
 	s := &Server{
-		cfg:     o.Config,
-		db:      o.DB,
-		log:     o.Log,
-		web:     o.Web,
-		sdk:     o.SDK,
-		box:     o.Box,
-		queue:   o.Queue,
-		broker:  o.Broker,
-		limits:  newLimiters(),
-		replays: newReplayCache(),
+		cfg:       o.Config,
+		telemetry: o.Telemetry,
+		db:        o.DB,
+		log:       o.Log,
+		web:       o.Web,
+		sdk:       o.SDK,
+		box:       o.Box,
+		queue:     o.Queue,
+		broker:    o.Broker,
+		limits:    newLimiters(),
+		replays:   newReplayCache(),
 	}
 	s.alerts = newAlerter(s)
 	s.initSSO()
@@ -66,6 +75,9 @@ func New(o Options) *Server {
 // delivery and evaluation, and retention.
 func (s *Server) Run(ctx context.Context) {
 	s.migrateLegacyWebhooks(ctx)
+	if s.telemetry != nil {
+		go s.telemetryLoop(ctx)
+	}
 	go s.queue.Consume(ctx, func(jobs [][]byte) []error { return s.processJobs(context.WithoutCancel(ctx), jobs) })
 	go s.alerts.run(ctx)
 	go s.maintenanceLoop(ctx)
@@ -103,6 +115,7 @@ func (s *Server) Handler() http.Handler {
 	h("GET /api/auth/oidc/callback", s.handleOIDCCallback)
 	h("POST /api/auth/cf-access", s.handleCFAccessLogin)
 	authed("POST /api/auth/password", s.handleChangePassword)
+	authed("POST /api/auth/email", s.handleChangeEmail)
 	authed("PATCH /api/me", s.handleUpdateProfile)
 	authed("GET /api/notifications", s.handleNotifications)
 	authed("POST /api/notifications/read", s.handleReadNotifications)

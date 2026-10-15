@@ -1,0 +1,35 @@
+# Optional override: docker compose -f docker-compose.yml -f docker-compose.clickhouse.yml up -d
+services:
+  workshell:
+    environment:
+      WORKSHELL_CLICKHOUSE_URL: http://clickhouse:8123
+      WORKSHELL_CLICKHOUSE_DATABASE: workshell
+      WORKSHELL_CLICKHOUSE_USER: workshell
+      WORKSHELL_CLICKHOUSE_PASSWORD: ${WORKSHELL_CLICKHOUSE_PASSWORD:?Set a ClickHouse password}
+      # For existing data, back up first, then export this as true until migration completes.
+      WORKSHELL_CLICKHOUSE_MIGRATE: ${WORKSHELL_CLICKHOUSE_MIGRATE:-false}
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: workshell
+      CLICKHOUSE_USER: workshell
+      CLICKHOUSE_PASSWORD: ${WORKSHELL_CLICKHOUSE_PASSWORD:?Set a ClickHouse password}
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+volumes:
+  clickhouse-data:
