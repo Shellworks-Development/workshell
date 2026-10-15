@@ -54,7 +54,8 @@ async function changePassword() {
     await api.post('/auth/password', pw)
     pw.currentPassword = ''
     pw.newPassword = ''
-    toast('Password changed', 'Your other sessions were signed out.')
+    toast(auth.hasPassword ? 'Password changed' : 'Password set', 'Your other sessions were signed out.')
+    auth.hasPassword = true
   } catch (e) {
     pwError.value = (e as Error).message
   }
@@ -174,16 +175,17 @@ const groups = ['Workshell', 'Catppuccin', 'Rosé Pine', 'Other'] as const
       </div>
     </div>
 
-    <form class="card" @submit.prevent="changePassword">
+    <form v-if="auth.sso.passwordLogin" class="card" @submit.prevent="changePassword">
       <div class="p-5">
         <h2 class="text-base font-semibold">Password</h2>
+        <p v-if="!auth.hasPassword" class="mt-1 text-[13px] text-muted">You sign in with single sign-on. Set a password to also sign in with your email.</p>
         <ErrorBanner :message="pwError" class="mt-4" />
         <div class="mt-4 grid gap-4 sm:grid-cols-2">
-          <div><label class="label" for="cur">Current password</label><input id="cur" v-model="pw.currentPassword" class="input" type="password" autocomplete="current-password" required /></div>
+          <div v-if="auth.hasPassword"><label class="label" for="cur">Current password</label><input id="cur" v-model="pw.currentPassword" class="input" type="password" autocomplete="current-password" required /></div>
           <div><label class="label" for="new">New password</label><input id="new" v-model="pw.newPassword" class="input" type="password" autocomplete="new-password" minlength="8" required /></div>
         </div>
       </div>
-      <div class="flex justify-end rounded-b-xl border-t border-border bg-surface-2/50 px-5 py-3"><button class="btn btn-primary">Change password</button></div>
+      <div class="flex justify-end rounded-b-xl border-t border-border bg-surface-2/50 px-5 py-3"><button class="btn btn-primary">{{ auth.hasPassword ? 'Change password' : 'Set password' }}</button></div>
     </form>
   </div>
 </template>

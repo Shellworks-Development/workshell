@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,26 @@ type Config struct {
 	// RedisURL enables Redis for the ingest queue and live streaming
 	// (e.g. redis://localhost:6379/0). Empty = in-process queue.
 	RedisURL string
+
+	// OIDC single sign-on (Google, Microsoft Entra, Okta, Authentik, ...).
+	// Enabled when OIDCIssuer and OIDCClientID are set; needs PublicURL.
+	OIDCIssuer       string
+	OIDCClientID     string
+	OIDCClientSecret string
+	// OIDCName labels the sign-in button ("Continue with <name>").
+	OIDCName string
+	// OIDCTrustEmail accepts emails the provider doesn't mark as verified
+	// (Microsoft Entra omits email_verified). Only for a single-tenant provider.
+	OIDCTrustEmail bool
+	// CFAccessTeam (e.g. "shellworks" or "shellworks.cloudflareaccess.com") and
+	// CFAccessAUD enable sign-in from a verified Cloudflare Access token.
+	CFAccessTeam string
+	CFAccessAUD  string
+	// SSOAllowedDomains lets anyone with a verified email on these domains
+	// create an account through SSO. Others need an account first.
+	SSOAllowedDomains []string
+	// NoPasswordLogin turns off email and password sign-in, requiring SSO.
+	NoPasswordLogin bool
 }
 
 func Load() Config {
@@ -42,6 +63,16 @@ func Load() Config {
 		SessionTTL:     time.Duration(integer("WORKSHELL_SESSION_DAYS", 30)) * 24 * time.Hour,
 		SecretKey:      str("WORKSHELL_SECRET_KEY", ""),
 		RedisURL:       str("WORKSHELL_REDIS_URL", ""),
+
+		OIDCIssuer:        str("WORKSHELL_OIDC_ISSUER", ""),
+		OIDCClientID:      str("WORKSHELL_OIDC_CLIENT_ID", ""),
+		OIDCClientSecret:  str("WORKSHELL_OIDC_CLIENT_SECRET", ""),
+		OIDCName:          str("WORKSHELL_OIDC_NAME", "SSO"),
+		OIDCTrustEmail:    boolean("WORKSHELL_OIDC_TRUST_EMAIL", false),
+		CFAccessTeam:      str("WORKSHELL_CF_ACCESS_TEAM", ""),
+		CFAccessAUD:       str("WORKSHELL_CF_ACCESS_AUD", ""),
+		SSOAllowedDomains: list("WORKSHELL_SSO_ALLOWED_DOMAINS"),
+		NoPasswordLogin:   !boolean("WORKSHELL_PASSWORD_LOGIN", true),
 	}
 }
 
@@ -50,6 +81,16 @@ func str(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func list(key string) []string {
+	var out []string
+	for _, v := range strings.Split(str(key, ""), ",") {
+		if v = strings.ToLower(strings.TrimSpace(v)); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func integer(key string, fallback int) int {

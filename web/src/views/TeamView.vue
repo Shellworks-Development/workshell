@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Trash2, UserPlus } from 'lucide-vue-next'
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import Avatar from '@/components/Avatar.vue'
 import Badge from '@/components/Badge.vue'
@@ -14,6 +14,7 @@ import { auth } from '@/lib/state'
 import { useAsync } from '@/lib/useAsync'
 
 const users = useAsync(() => api.get<User[]>('/users'))
+const sso = computed(() => !!auth.sso.oidc || auth.sso.cfAccess)
 const inviting = ref(false)
 const invite = reactive({ name: '', email: '', password: '', isAdmin: false })
 const inviteError = ref<string | null>(null)
@@ -21,7 +22,7 @@ async function addUser() {
   inviteError.value = null
   try {
     await api.post('/users', invite)
-    toast(`Added ${invite.name}`, `They can sign in as ${invite.email}.`)
+    toast(`Added ${invite.name}`, invite.password ? `They can sign in as ${invite.email}.` : `They can sign in with SSO as ${invite.email}.`)
     Object.assign(invite, { name: '', email: '', password: '', isAdmin: false })
     inviting.value = false
     await users.reload()
@@ -71,12 +72,20 @@ async function removeUser(u: User) {
     </RouterLink>
   </div>
 
-  <Modal :open="inviting" title="Add a team member" description="They'll sign in with this email and password, and can change the password later." @close="inviting = false">
+  <Modal
+    :open="inviting"
+    title="Add a team member"
+    :description="sso ? 'They can sign in with single sign-on using this email. Add a password only if they also need to sign in without SSO.' : 'They\'ll sign in with this email and password, and can change the password later.'"
+    @close="inviting = false"
+  >
     <form id="invite" class="space-y-3" @submit.prevent="addUser">
       <ErrorBanner :message="inviteError" />
       <div><label class="label" for="iname">Name</label><input id="iname" v-model="invite.name" class="input" required data-autofocus /></div>
       <div><label class="label" for="iemail">Email</label><input id="iemail" v-model="invite.email" class="input" type="email" required /></div>
-      <div><label class="label" for="ipass">Initial password</label><input id="ipass" v-model="invite.password" class="input" type="password" minlength="8" required autocomplete="new-password" /></div>
+      <div v-if="!sso || auth.sso.passwordLogin">
+        <label class="label" for="ipass">Initial password<span v-if="sso" class="font-normal text-faint"> (optional)</span></label>
+        <input id="ipass" v-model="invite.password" class="input" type="password" minlength="8" :required="!sso" autocomplete="new-password" />
+      </div>
       <label class="flex items-center gap-2 text-[13px]"><input v-model="invite.isAdmin" type="checkbox" class="accent-(--fg)" /> Admin (can add and remove members)</label>
     </form>
     <template #footer>

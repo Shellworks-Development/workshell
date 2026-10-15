@@ -28,6 +28,9 @@ type Server struct {
 	alerts  *alerter
 	limits  *limiters
 	replays *replayCache
+
+	oidc     *oidcProvider
+	cfAccess *cfAccess
 }
 
 type Options struct {
@@ -55,6 +58,7 @@ func New(o Options) *Server {
 		replays: newReplayCache(),
 	}
 	s.alerts = newAlerter(s)
+	s.initSSO()
 	return s
 }
 
@@ -95,6 +99,9 @@ func (s *Server) Handler() http.Handler {
 	h("POST /api/auth/setup", s.handleSetup)
 	h("POST /api/auth/login", s.handleLogin)
 	h("POST /api/auth/logout", s.handleLogout)
+	h("GET /api/auth/oidc/start", s.handleOIDCStart)
+	h("GET /api/auth/oidc/callback", s.handleOIDCCallback)
+	h("POST /api/auth/cf-access", s.handleCFAccessLogin)
 	authed("POST /api/auth/password", s.handleChangePassword)
 	authed("PATCH /api/me", s.handleUpdateProfile)
 	authed("GET /api/notifications", s.handleNotifications)

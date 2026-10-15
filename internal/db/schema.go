@@ -459,4 +459,18 @@ INSERT INTO issue_samples (issue_id, release, n) SELECT issue_id, release, COUNT
 ALTER TABLE projects ADD COLUMN roblox_webhook_secret TEXT NOT NULL DEFAULT '';
 CREATE INDEX issue_users_user ON issue_users(user_id);
 `,
+	// v7: single sign-on. An identity is a provider's stable subject for a
+	// user; SSO-only users have an empty password_hash.
+	`
+CREATE TABLE user_identities (
+	provider   TEXT NOT NULL,
+	subject    TEXT NOT NULL,
+	user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	email      TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	last_used  INTEGER NOT NULL,
+	PRIMARY KEY (provider, subject)
+) WITHOUT ROWID;
+CREATE INDEX user_identities_user ON user_identities(user_id);
+`,
 }

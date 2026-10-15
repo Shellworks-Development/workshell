@@ -32,7 +32,7 @@ Fixes go into the latest release. Workshell is pre-1.0, so please upgrade to the
 In scope:
 
 - **Ingest:** anything a game server or game client can send that bypasses validation, rate limits, request signing or replay protection, corrupts other projects' data, or crashes or stalls the server.
-- **Dashboard:** cross-site scripting (including through data sent by a game), authentication or session flaws, access to another project's data, CSRF, or privilege escalation between users.
+- **Dashboard:** cross-site scripting (including through data sent by a game), authentication or session flaws (including single sign-on: forged or replayed ID tokens and Cloudflare Access headers), access to another project's data, CSRF, or privilege escalation between users.
 - **Secrets:** ingest keys, signing secrets, webhook secrets, GitHub tokens or the encryption key leaking through the API, logs or the dashboard.
 - **Roblox erasure webhooks:** accepting a notification without a valid signature, or erasing the wrong player.
 - **SDK:** a client being able to forge server-only data (detections, purchases, `$`-prefixed events) or impersonate another player.

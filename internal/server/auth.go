@@ -129,10 +129,40 @@ func (s *Server) handleAuthState(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	// Behind Cloudflare Access, a verified visitor is signed in without a
+	// second login, unless they just signed out of Workshell.
+	var ssoError string
+	if u == nil && n > 0 && s.cfAccess != nil {
+		if _, out := r.Cookie(signedOutCookie); out != nil {
+			id, err := s.cfAccessUser(r)
+			switch {
+			case err != nil:
+				ssoError = ssoMessage(err)
+			case id > 0:
+				if err := s.startSession(w, r, id); err != nil {
+					return err
+				}
+				if u, err = scanUser(s.db.R.QueryRowContext(r.Context(), `SELECT `+userColumns+` FROM users u WHERE u.id = ?`, id)); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	hasPassword := false
+	if u != nil {
+		var hash string
+		if err := s.db.R.QueryRowContext(r.Context(), `SELECT password_hash FROM users WHERE id = ?`, u.ID).Scan(&hash); err != nil {
+			return err
+		}
+		hasPassword = hash != ""
+	}
 	return ok(w, map[string]any{
 		"setupRequired": n == 0,
 		"user":          u,
+		"hasPassword":   hasPassword,
 		"publicUrl":     s.cfg.PublicURL,
+		"sso":           s.ssoState(),
+		"ssoError":      ssoError,
 	})
 }
 
@@ -143,13 +173,8 @@ type credentials struct {
 }
 
 func (c *credentials) validate(needName bool) error {
-	c.Email = strings.TrimSpace(c.Email)
-	c.Name = strings.TrimSpace(c.Name)
-	if _, err := mail.ParseAddress(c.Email); err != nil {
-		return badRequest("enter a valid email address")
-	}
-	if needName && c.Name == "" {
-		return badRequest("name is required")
+	if err := c.validateIdentity(needName); err != nil {
+		return err
 	}
 	if len(c.Password) < 8 {
 		return badRequest("password must be at least 8 characters")
@@ -160,10 +185,25 @@ func (c *credentials) validate(needName bool) error {
 	return nil
 }
 
+func (c *credentials) validateIdentity(needName bool) error {
+	c.Email = strings.TrimSpace(c.Email)
+	c.Name = strings.TrimSpace(c.Name)
+	if _, err := mail.ParseAddress(c.Email); err != nil {
+		return badRequest("enter a valid email address")
+	}
+	if needName && c.Name == "" {
+		return badRequest("name is required")
+	}
+	return nil
+}
+
 func (s *Server) createUser(r *http.Request, c credentials, admin bool) (int64, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(c.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return 0, err
+	var hash []byte
+	if c.Password != "" {
+		var err error
+		if hash, err = bcrypt.GenerateFromPassword([]byte(c.Password), bcrypt.DefaultCost); err != nil {
+			return 0, err
+		}
 	}
 	handle, err := s.uniqueHandle(r, c.Email)
 	if err != nil {
@@ -208,6 +248,9 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {
+	if s.cfg.NoPasswordLogin {
+		return errStatus(http.StatusForbidden, "password sign-in is turned off; use single sign-on")
+	}
 	var c credentials
 	if err := readJSON(r, &c); err != nil {
 		return err
@@ -230,7 +273,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(c.Password)) != nil {
+	if hash == "" || bcrypt.CompareHashAndPassword([]byte(hash), []byte(c.Password)) != nil {
 		return errStatus(http.StatusUnauthorized, "incorrect email or password")
 	}
 	if err := s.startSession(w, r, id); err != nil {
@@ -244,6 +287,11 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) error {
 		s.db.W.ExecContext(r.Context(), `DELETE FROM sessions WHERE token_hash = ?`, hashToken(c.Value))
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
+	if s.cfAccess != nil {
+		// Stop Cloudflare Access from signing this browser straight back in.
+		http.SetCookie(w, &http.Cookie{Name: signedOutCookie, Value: "1", Path: "/", HttpOnly: true,
+			Secure: s.cfg.SecureCookies, SameSite: http.SameSiteLaxMode})
+	}
 	return ok(w, map[string]any{"ok": true})
 }
 
@@ -259,7 +307,8 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, u 
 	if err := s.db.R.QueryRowContext(r.Context(), `SELECT password_hash FROM users WHERE id = ?`, u.ID).Scan(&hash); err != nil {
 		return err
 	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(body.Current)) != nil {
+	// Accounts made through SSO have no password until they set one.
+	if hash != "" && bcrypt.CompareHashAndPassword([]byte(hash), []byte(body.Current)) != nil {
 		return badRequest("current password is incorrect")
 	}
 	c := credentials{Email: u.Email, Name: u.Name, Password: body.New}
@@ -313,7 +362,12 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request, u *use
 	if err := readJSON(r, &body); err != nil {
 		return err
 	}
-	if err := body.validate(true); err != nil {
+	// With SSO on, a member can be added by email alone and signs in through SSO.
+	validate := body.validate
+	if body.Password == "" && s.ssoEnabled() {
+		validate = body.validateIdentity
+	}
+	if err := validate(true); err != nil {
 		return err
 	}
 	id, err := s.createUser(r, body.credentials, body.IsAdmin)

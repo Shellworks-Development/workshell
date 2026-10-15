@@ -2,18 +2,30 @@ import { computed, reactive, ref, watch } from 'vue'
 import { api, type Notification, type ProjectSummary, type User } from './api'
 import { themeById, themes, themeVars, type AccentKey, type Theme } from './themes'
 
+export interface SSOState {
+  oidc: { name: string } | null
+  cfAccess: boolean
+  passwordLogin: boolean
+}
+
 export const auth = reactive({
   loaded: false,
   setupRequired: false,
   user: null as User | null,
+  hasPassword: false,
   publicUrl: '',
+  sso: { oidc: null, cfAccess: false, passwordLogin: true } as SSOState,
+  ssoError: '',
 })
 
 export async function loadAuth() {
-  const s = await api.get<{ setupRequired: boolean; user: User | null; publicUrl: string }>('/auth/state')
+  const s = await api.get<{ setupRequired: boolean; user: User | null; hasPassword: boolean; publicUrl: string; sso: SSOState; ssoError: string }>('/auth/state')
   auth.setupRequired = s.setupRequired
   auth.user = s.user
+  auth.hasPassword = s.hasPassword
   auth.publicUrl = s.publicUrl
+  auth.sso = s.sso
+  auth.ssoError = s.ssoError
   auth.loaded = true
   if (s.user?.prefs) applyPrefs(s.user.prefs)
 }

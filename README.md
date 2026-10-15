@@ -215,6 +215,12 @@ Found a vulnerability? Please report it privately; see [SECURITY.md](SECURITY.md
 | `WORKSHELL_TRUST_PROXY` | `false` | Trust `X-Forwarded-*` headers from a reverse proxy |
 | `WORKSHELL_MAX_INGEST_BYTES` | `8388608` | Maximum decompressed ingest request size |
 | `WORKSHELL_SESSION_DAYS` | `30` | Dashboard login lifetime |
+| `WORKSHELL_OIDC_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET`, `_NAME` | | Sign in with an OpenID Connect provider (Google, Entra, Okta, Authentik, Keycloak) |
+| `WORKSHELL_CF_ACCESS_TEAM`, `WORKSHELL_CF_ACCESS_AUD` | | Sign in people who already passed Cloudflare Access |
+| `WORKSHELL_SSO_ALLOWED_DOMAINS` | | Comma-separated email domains that can create an account through SSO; others need an admin to add them |
+| `WORKSHELL_PASSWORD_LOGIN` | `true` | Set to `false` to require single sign-on |
+
+Single sign-on setup, including the Cloudflare Access bypass your game servers need, is in the [SSO docs](https://workshell.shellworks.dev/docs/self-hosting/sso).
 
 To connect GitHub (**Settings → Integrations**), use a fine-grained personal access token limited to your game's repository with **Issues: Read and write** (GitHub adds **Metadata: Read-only** automatically). Workshell needs no other permission.
 
